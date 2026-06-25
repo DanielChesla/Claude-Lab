@@ -386,18 +386,26 @@ function tickCountdown() {
   const root = document.getElementById("countdown");
   const now = marathonNow();
   const day = now.getDay();   // 0 Sun … 5 Fri … 6 Sat
+  const minutes = now.getHours() * 60 + now.getMinutes();
 
-  // Next Friday 5:00 PM Eastern.
+  // Weekend window: Friday 5:01 PM → Sunday 11:59 PM (Marathon time).
+  const isWeekend =
+    (day === 5 && minutes >= 17 * 60 + 1) ||  // Friday from 5:01 PM
+    day === 6 ||                               // all of Saturday
+    day === 0;                                 // all of Sunday (until midnight → Monday)
+  if (isWeekend) {
+    root.innerHTML = `<div class="cd-weekend">🎣 It's the weekend,<br>gone fishing</div>`;
+    return;
+  }
+
+  // Countdown to the upcoming Friday 5:00 PM Eastern.
   const target = new Date(now);
   target.setDate(now.getDate() + ((5 - day + 7) % 7));
   target.setHours(17, 0, 0, 0);
-  if (target <= now) target.setDate(target.getDate() + 7); // already past this week's
-
-  // It's the weekend once Friday 5 PM passes, through end of Sunday.
-  const isWeekend = (day === 5 && now.getHours() >= 17) || day === 6 || day === 0;
-  if (isWeekend) {
-    root.innerHTML = `<div class="cd-weekend">🎉 It's the weekend!<br>Enjoy the Keys 🏝️</div>`;
-    return;
+  // Roll to next week once past 5 PM — except during the brief 5:00–5:01 PM
+  // boundary minute, where we just show 00:00:00 until the weekend kicks in.
+  if (target <= now && !(day === 5 && minutes === 17 * 60)) {
+    target.setDate(target.getDate() + 7);
   }
 
   let diff = Math.max(0, target - now);
