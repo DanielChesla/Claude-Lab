@@ -181,11 +181,10 @@
   }
   .map-legend b { color: #e6edf3; font-weight: 600; }
   .sun-state { color: var(--amber); font-weight: 700; }
-  .home-marker { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
-  .home-marker .pin {
-    width: 11px; height: 11px; border-radius: 50%;
-    background: #ff5d5d; border: 1.5px solid #fff;
-    box-shadow: 0 0 8px 1px rgba(255,93,93,.9);
+  .home-marker { display: flex; align-items: center; gap: 3px; white-space: nowrap; }
+  .home-marker .palm {
+    font-size: 19px; line-height: 1;
+    filter: drop-shadow(0 0 3px #000) drop-shadow(0 1px 2px #000);
   }
   .home-marker .lbl {
     color: #fff; font-size: .7rem; font-weight: 700;
@@ -193,7 +192,7 @@
   }
   .v.vis-yes { color: var(--green); }
   .v.vis-no  { color: var(--muted); }
-  #s-visible-label.next { color: var(--amber); }
+  .next-inline { font-size: .72rem; font-weight: 500; color: var(--amber); }
 
   @media (max-width: 760px) {
     .main { flex-direction: column; }
@@ -224,7 +223,7 @@
       <div class="stat"><div class="v" id="s-crew">—</div><div class="l">Crew</div></div>
       <div class="stat"><div class="v amber" id="s-orbits">—</div><div class="l">Orbits today</div></div>
       <div class="stat"><div class="v" id="s-sun">—</div><div class="l">Sunlight</div></div>
-      <div class="stat"><div class="v" id="s-visible">—</div><div class="l" id="s-visible-label">Visible (Home)</div></div>
+      <div class="stat"><div class="v" id="s-visible">—</div><div class="l" id="s-visible-label">Visible from Marathon FL</div></div>
     </div>
   </header>
 
@@ -326,22 +325,22 @@ function initMap() {
     opacity: 0.7
   }).addTo(map);
 
-  // Home marker (Marathon, FL)
+  // Home marker (Marathon, FL) — a little palm tree
   const homeIcon = L.divIcon({
     className: "",
-    html: '<div class="home-marker"><span class="pin"></span><span class="lbl">Home</span></div>',
-    iconSize: [0, 0], iconAnchor: [6, 6]
+    html: '<div class="home-marker"><span class="palm">🌴</span><span class="lbl">Home</span></div>',
+    iconSize: [0, 0], iconAnchor: [9, 18]
   });
   L.marker([HOME.lat, HOME.lon], { icon: homeIcon })
     .addTo(map)
-    .bindPopup("🏠 " + HOME.name);
+    .bindPopup("🌴 " + HOME.name);
 
   // Legend
   const legend = L.control({ position: "bottomleft" });
   legend.onAdd = function () {
     const d = L.DomUtil.create("div", "map-legend");
     d.innerHTML = '<b>🛰️ ISS</b> · <span style="color:#58a6ff">— path</span> · ' +
-                  '<span style="color:#ff5d5d">● Home</span><br>' +
+                  '🌴 Home<br>' +
                   'Shaded = night · ISS: <span class="sun-state" id="leg-sun">—</span>';
     return d;
   };
@@ -574,15 +573,16 @@ function fmtPass(date) {
 function updateVisibility(visibleNow) {
   const v = document.getElementById("s-visible");
   const l = document.getElementById("s-visible-label");
+  l.textContent = "Visible from Marathon FL";
+  l.className = "l";
+
   if (visibleNow) {
     nextPass = null;
-    v.textContent = "Yes 👀";
+    v.innerHTML = "Yes 👀";
     v.className = "v vis-yes";
-    l.textContent = "Visible (Home)";
-    l.className = "l";
     return;
   }
-  v.textContent = "No";
+
   v.className = "v vis-no";
   // Refresh the next-pass estimate if we don't have a future one yet
   // (throttled — the 10-day search is comparatively expensive).
@@ -591,14 +591,11 @@ function updateVisibility(visibleNow) {
     nextPass = findNextPass(new Date());
   }
   if (nextPass) {
-    l.textContent = "Next: " + fmtPass(nextPass);
-    l.className = "l next";
+    v.innerHTML = 'No <span class="next-inline">· next ' + fmtPass(nextPass) + '</span>';
   } else if (satrec) {
-    l.textContent = "No pass in 10 days";
-    l.className = "l";
+    v.innerHTML = 'No <span class="next-inline">· none in 10 days</span>';
   } else {
-    l.textContent = "Visible (Home)";
-    l.className = "l";
+    v.innerHTML = "No";
   }
 }
 
