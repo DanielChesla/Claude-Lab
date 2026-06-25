@@ -171,10 +171,35 @@
   }
   .leaflet-control-attribution a { color: #58a6ff !important; }
   .iss-icon {
+    position: relative;
     font-size: 26px;
     filter: drop-shadow(0 0 6px rgba(88,166,255,.9)) drop-shadow(0 0 2px rgba(255,255,255,.8));
     text-align: center;
     line-height: 30px;
+  }
+  /* Steady glowing halo so the ISS always stands out */
+  .iss-icon::before {
+    content: "";
+    position: absolute; left: 50%; top: 50%;
+    width: 26px; height: 26px; margin: -13px 0 0 -13px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(88,166,255,.9);
+    box-shadow: 0 0 10px 2px rgba(88,166,255,.65), inset 0 0 6px rgba(88,166,255,.5);
+    pointer-events: none;
+  }
+  /* Expanding radar "ping" ring */
+  .iss-icon::after {
+    content: "";
+    position: absolute; left: 50%; top: 50%;
+    width: 26px; height: 26px; margin: -13px 0 0 -13px;
+    border-radius: 50%;
+    border: 2px solid rgba(88,166,255,.8);
+    pointer-events: none;
+    animation: iss-ping 2.2s ease-out infinite;
+  }
+  @keyframes iss-ping {
+    0%   { transform: scale(0.7); opacity: 0.9; }
+    100% { transform: scale(2.4); opacity: 0; }
   }
   .map-legend {
     background: #161b22; color: #8b949e;
