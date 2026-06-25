@@ -96,12 +96,14 @@
   .crew-note { font-size: .7rem; color: var(--amber); margin-bottom: 8px; display: none; }
   .crew-list { display: flex; flex-direction: column; gap: 8px; }
   .crew-member { display: flex; align-items: center; gap: 10px; }
-  .avatar {
-    width: 32px; height: 32px; border-radius: 50%;
-    background: linear-gradient(135deg, #1f6feb, #58a6ff);
-    color: #fff; font-size: .72rem; font-weight: 700;
+  .flag-img {
+    width: 28px; height: 21px; border-radius: 3px; object-fit: cover;
+    flex-shrink: 0; box-shadow: 0 0 0 1px rgba(255,255,255,.2), 0 1px 2px rgba(0,0,0,.5);
+  }
+  .flag-unknown {
+    width: 28px; height: 21px; border-radius: 3px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
+    background: var(--panel-2); font-size: .9rem;
   }
   .crew-member .nm { font-size: .86rem; }
 
@@ -530,15 +532,40 @@ async function reverseGeocode(lat, lon) {
 }
 
 /* ===================== Crew ===================== */
-function initials(name) {
-  const p = name.trim().split(/\s+/);
-  return ((p[0]?.[0] || "") + (p[p.length - 1]?.[0] || "")).toUpperCase();
+// Name → [ISO country code, country name] for flag lookup.
+const CREW_FLAGS = {
+  "Oleg Kononenko": ["ru", "Russia"], "Nikolai Chub": ["ru", "Russia"],
+  "Tracy Caldwell Dyson": ["us", "USA"], "Matthew Dominick": ["us", "USA"],
+  "Michael Barratt": ["us", "USA"], "Jeanette Epps": ["us", "USA"],
+  "Alexander Grebenkin": ["ru", "Russia"],
+  // Other recent / well-known ISS crew (used if the live feed works)
+  "Sunita Williams": ["us", "USA"], "Suni Williams": ["us", "USA"],
+  "Butch Wilmore": ["us", "USA"], "Barry Wilmore": ["us", "USA"],
+  "Don Pettit": ["us", "USA"], "Donald Pettit": ["us", "USA"],
+  "Aleksey Ovchinin": ["ru", "Russia"], "Alexey Ovchinin": ["ru", "Russia"],
+  "Ivan Vagner": ["ru", "Russia"], "Nick Hague": ["us", "USA"],
+  "Aleksandr Gorbunov": ["ru", "Russia"], "Alexander Gorbunov": ["ru", "Russia"],
+  "Takuya Onishi": ["jp", "Japan"], "Kirill Peskov": ["ru", "Russia"],
+  "Anne McClain": ["us", "USA"], "Nichole Ayers": ["us", "USA"],
+  "Sergey Ryzhikov": ["ru", "Russia"], "Andreas Mogensen": ["dk", "Denmark"],
+  "Satoshi Furukawa": ["jp", "Japan"], "Konstantin Borisov": ["ru", "Russia"],
+  "Loral O'Hara": ["us", "USA"], "Jasmin Moghbeli": ["us", "USA"],
+  "Samantha Cristoforetti": ["it", "Italy"], "Thomas Pesquet": ["fr", "France"],
+  "Alexander Gerst": ["de", "Germany"], "David Saint-Jacques": ["ca", "Canada"],
+  "Chris Hadfield": ["ca", "Canada"], "Sultan Alneyadi": ["ae", "UAE"]
+};
+function flagFor(name) {
+  const m = CREW_FLAGS[name];
+  if (m) {
+    return `<img class="flag-img" src="https://flagcdn.com/56x42/${m[0]}.png" alt="${m[1]}" title="${m[1]}" loading="lazy">`;
+  }
+  return `<div class="flag-unknown" title="Unknown">🌐</div>`;
 }
 function renderCrew(names, isFallback) {
   document.getElementById("crew-note").style.display = isFallback ? "block" : "none";
   document.getElementById("s-crew").textContent = names.length;
   document.getElementById("crew-list").innerHTML = names.map(n =>
-    `<div class="crew-member"><div class="avatar">${initials(n)}</div><div class="nm">${n}</div></div>`
+    `<div class="crew-member">${flagFor(n)}<div class="nm">${n}</div></div>`
   ).join("");
 }
 async function loadCrew() {
