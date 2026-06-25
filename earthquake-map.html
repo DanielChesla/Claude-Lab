@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live Earthquake Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+<style>
+  :root {
+    --bg: #0a0e14;
+    --panel: #0d1117;
+    --panel-2: #161b22;
+    --border: #21262d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --shallow: #3fb950;  /* <70 km */
+    --mid: #f0883e;      /* 70-300 km */
+    --deep: #f85149;     /* >300 km */
+    --accent: #58a6ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ---- Header ---- */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 11px 18px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 1.15rem; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; }
+  .stats { display: flex; gap: 22px; margin-left: auto; flex-wrap: wrap; align-items: center; }
+  .stat .v { font-size: 1.2rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.05; }
+  .stat .l { font-size: .64rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+  .stat .v.big { color: var(--deep); }
+  .toggle {
+    display: flex; align-items: center; gap: 7px;
+    font-size: .8rem; color: var(--muted);
+    cursor: pointer; user-select: none;
+    padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--panel-2);
+  }
+  .toggle input { accent-color: var(--accent); cursor: pointer; }
+
+  /* ---- Main ---- */
+  .main { flex: 1; display: flex; min-height: 0; }
+  #map { flex: 1; height: 100%; background: #0a0e14; }
+
+  .sidebar {
+    width: 340px;
+    flex-shrink: 0;
+    background: var(--panel);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+  }
+  .sidebar h2 {
+    font-size: .72rem; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); padding: 14px 16px 8px;
+  }
+  .eq-list { flex: 1; overflow-y: auto; padding: 0 10px; }
+  .eq-item {
+    display: flex; align-items: center; gap: 11px;
+    padding: 9px 8px; border-radius: 8px; cursor: pointer;
+    border-bottom: 1px solid var(--border);
+  }
+  .eq-item:last-child { border-bottom: none; }
+  .eq-item:hover { background: var(--panel-2); }
+  .eq-circle {
+    width: 38px; height: 38px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: .92rem; color: #08160c; flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .eq-info { min-width: 0; }
+  .eq-info .place { font-size: .85rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .eq-info .meta { font-size: .73rem; color: var(--muted); margin-top: 1px; }
+
+  /* ---- Legend ---- */
+  .legend { border-top: 1px solid var(--border); padding: 12px 16px; font-size: .76rem; }
+  .legend .lt { font-size: .66rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 0 0 6px; }
+  .legend .row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; color: var(--muted); }
+  .legend .swatch { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+  .legend .sizes { display: flex; align-items: flex-end; gap: 12px; margin-top: 4px; }
+  .legend .sz { display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--muted); font-size: .68rem; }
+  .legend .dot { background: #8b949e; border-radius: 50%; }
+
+  /* ---- Footer ---- */
+  footer {
+    padding: 7px 18px; background: var(--panel); border-top: 1px solid var(--border);
+    font-size: .72rem; color: var(--muted);
+    display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+
+  /* ---- Leaflet dark overrides ---- */
+  .leaflet-bar a, .leaflet-control-attribution {
+    background: #161b22 !important; color: #8b949e !important; border-color: #21262d !important;
+  }
+  .leaflet-control-attribution a { color: #58a6ff !important; }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+    background: #161b22; color: #e6edf3; border: 1px solid #21262d;
+    box-shadow: 0 4px 14px rgba(0,0,0,.5);
+  }
+  .leaflet-popup-content { margin: 12px 14px; }
+  .leaflet-popup-close-button { color: #8b949e !important; }
+  .eq-popup .eq-mag { font-size: 1.6rem; font-weight: 800; line-height: 1; margin-bottom: 5px; }
+  .eq-popup .eq-place { font-size: .9rem; font-weight: 600; margin-bottom: 6px; }
+  .eq-popup .eq-row { font-size: .8rem; color: #8b949e; }
+  .eq-popup .eq-tsunami { margin-top: 7px; color: #58a6ff; font-weight: 700; font-size: .82rem; }
+
+  @media (max-width: 780px) {
+    .main { flex-direction: column; }
+    .sidebar { width: 100%; height: 42%; border-left: none; border-top: 1px solid var(--border); }
+    #map { height: 58%; }
+    .stats { gap: 14px; }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>🌎 Live Earthquake Map</h1>
+    <div class="stats">
+      <div class="stat"><div class="v" id="s-total">—</div><div class="l">Quakes / 24h</div></div>
+      <div class="stat"><div class="v" id="s-strong">—</div><div class="l">M4.5+</div></div>
+      <div class="stat"><div class="v big" id="s-largest">—</div><div class="l">Largest</div></div>
+      <label class="toggle"><input type="checkbox" id="plates-toggle"> 🌋 Plate boundaries</label>
+    </div>
+  </header>
+
+  <div class="main">
+    <div id="map"></div>
+    <aside class="sidebar">
+      <h2>Top 10 largest (24h)</h2>
+      <div class="eq-list" id="eq-list"></div>
+      <div class="legend">
+        <p class="lt">Depth</p>
+        <div class="row"><span class="swatch" style="background:var(--shallow)"></span> Shallow &lt; 70 km</div>
+        <div class="row"><span class="swatch" style="background:var(--mid)"></span> Intermediate 70–300 km</div>
+        <div class="row"><span class="swatch" style="background:var(--deep)"></span> Deep &gt; 300 km</div>
+        <p class="lt" style="margin-top:10px">Magnitude</p>
+        <div class="sizes">
+          <div class="sz"><span class="dot" style="width:8px;height:8px"></span>M2</div>
+          <div class="sz"><span class="dot" style="width:16px;height:16px"></span>M4</div>
+          <div class="sz"><span class="dot" style="width:28px;height:28px"></span>M6</div>
+          <div class="sz"><span class="dot" style="width:44px;height:44px"></span>M7+</div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <footer>
+    <div>Data: <a href="https://earthquake.usgs.gov/" target="_blank" rel="noopener">USGS Earthquake Hazards Program</a> ·
+      plates © <a href="https://github.com/fraxen/tectonicplates" target="_blank" rel="noopener">Hugo Ahlenius / PB2002</a> ·
+      tiles © <a href="https://carto.com/" target="_blank" rel="noopener">CARTO</a></div>
+    <div>Auto-refresh every 5 min · updated <span id="last-updated">—</span></div>
+  </footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+"use strict";
+
+/* ===================== Config ===================== */
+const USGS_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson";
+const PLATES_URL = "https://raw.githubusercontent.com/fraxen/tectonicplates/master/GeoJSON/PB2002_boundaries.json";
+const REFRESH_MS = 5 * 60 * 1000;
+
+let map, quakeLayer, platesLayer = null, platesLoaded = false;
+
+/* ===================== Helpers ===================== */
+function depthColor(depth) {
+  if (depth < 70) return "#3fb950";
+  if (depth <= 300) return "#f0883e";
+  return "#f85149";
+}
+function magRadius(mag) {
+  return Math.max(3, Math.pow(2, mag) * 0.8);
+}
+function timeAgo(ms) {
+  const s = Math.floor((Date.now() - ms) / 1000);
+  if (s < 60) return s + "s ago";
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + "m ago";
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + "h ago";
+  return Math.floor(h / 24) + "d ago";
+}
+function fmtMag(m) { return (m == null ? "?" : m.toFixed(1)); }
+
+/* ===================== Map setup ===================== */
+function initMap() {
+  map = L.map("map", { worldCopyJump: true }).setView([20, 0], 2);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    subdomains: "abcd",
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+  }).addTo(map);
+  quakeLayer = L.layerGroup().addTo(map);
+}
+
+/* ===================== Popups ===================== */
+function popupHtml(props, depth) {
+  const color = depthColor(depth);
+  const tsunami = props.tsunami ? '<div class="eq-tsunami">🌊 Tsunami alert issued</div>' : "";
+  return `<div class="eq-popup">
+    <div class="eq-mag" style="color:${color}">M ${fmtMag(props.mag)}</div>
+    <div class="eq-place">${props.place || "Unknown location"}</div>
+    <div class="eq-row">Depth: ${depth.toFixed(1)} km</div>
+    <div class="eq-row">${new Date(props.time).toLocaleString()}</div>
+    ${tsunami}
+  </div>`;
+}
+
+/* ===================== Render ===================== */
+function render(features) {
+  quakeLayer.clearLayers();
+
+  let strong = 0, largest = -Infinity;
+  features.forEach(f => {
+    const [lon, lat, depth] = f.geometry.coordinates;
+    const mag = f.properties.mag;
+    if (mag != null) { if (mag >= 4.5) strong++; if (mag > largest) largest = mag; }
+
+    L.circleMarker([lat, lon], {
+      radius: magRadius(mag == null ? 0 : mag),
+      color: depthColor(depth),
+      weight: 1,
+      opacity: 0.85,
+      fillColor: depthColor(depth),
+      fillOpacity: 0.5
+    }).bindPopup(popupHtml(f.properties, depth)).addTo(quakeLayer);
+  });
+
+  // Stats
+  document.getElementById("s-total").textContent = features.length.toLocaleString();
+  document.getElementById("s-strong").textContent = strong;
+  document.getElementById("s-largest").textContent =
+    largest > -Infinity ? "M " + largest.toFixed(1) : "—";
+
+  // Sidebar: top 10 by magnitude
+  const top = features
+    .filter(f => f.properties.mag != null)
+    .sort((a, b) => b.properties.mag - a.properties.mag)
+    .slice(0, 10);
+
+  const list = document.getElementById("eq-list");
+  list.innerHTML = "";
+  top.forEach(f => {
+    const [lon, lat, depth] = f.geometry.coordinates;
+    const p = f.properties;
+    const color = depthColor(depth);
+    const item = document.createElement("div");
+    item.className = "eq-item";
+    item.innerHTML = `
+      <div class="eq-circle" style="background:${color}">${fmtMag(p.mag)}</div>
+      <div class="eq-info">
+        <div class="place">${p.place || "Unknown location"}</div>
+        <div class="meta">${depth.toFixed(0)} km deep · ${timeAgo(p.time)}</div>
+      </div>`;
+    item.addEventListener("click", () => map.flyTo([lat, lon], 6));
+    list.appendChild(item);
+  });
+
+  document.getElementById("last-updated").textContent = new Date().toLocaleTimeString();
+}
+
+/* ===================== Data ===================== */
+async function loadQuakes() {
+  try {
+    const res = await fetch(USGS_URL, { cache: "no-store" });
+    const data = await res.json();
+    render(data.features || []);
+  } catch (e) {
+    document.getElementById("last-updated").textContent = "fetch error — retrying…";
+  }
+}
+
+/* ===================== Plate boundaries (toggle) ===================== */
+async function togglePlates(on) {
+  if (on) {
+    if (!platesLoaded) {
+      try {
+        const res = await fetch(PLATES_URL, { cache: "force-cache" });
+        const gj = await res.json();
+        platesLayer = L.geoJSON(gj, {
+          style: { color: "#e3b341", weight: 1, opacity: 0.6 },
+          interactive: false
+        });
+        platesLoaded = true;
+      } catch (e) {
+        document.getElementById("plates-toggle").checked = false;
+        return;
+      }
+    }
+    platesLayer.addTo(map);
+    platesLayer.bringToBack();
+  } else if (platesLayer) {
+    platesLayer.remove();
+  }
+}
+
+/* ===================== Boot ===================== */
+initMap();
+loadQuakes();
+setInterval(loadQuakes, REFRESH_MS);
+document.getElementById("plates-toggle").addEventListener("change", e => togglePlates(e.target.checked));
+</script>
+</body>
+</html>
