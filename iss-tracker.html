@@ -251,6 +251,7 @@
       <div class="stat"><div class="v amber" id="s-orbits">—</div><div class="l">Orbits today</div></div>
       <div class="stat"><div class="v" id="s-sun">—</div><div class="l">Sunlight</div></div>
       <div class="stat"><div class="v" id="s-visible">—</div><div class="l" id="s-visible-label">Visible from Marathon FL</div></div>
+      <div class="stat"><div class="v" id="s-dist">—</div><div class="l">Distance from Marathon FL</div></div>
     </div>
   </header>
 
@@ -469,6 +470,12 @@ function issElevation(issLat, issLon, altKm) {
   const gamma = angularDist(HOME.lat, HOME.lon, issLat, issLon) * D2R;
   return Math.atan2(Math.cos(gamma) - R_EARTH / (R_EARTH + altKm), Math.sin(gamma)) / D2R;
 }
+// True line-of-sight (slant) distance in km from home to the ISS.
+function slantRange(issLat, issLon, altKm) {
+  const gamma = angularDist(HOME.lat, HOME.lon, issLat, issLon) * D2R;
+  const Rs = R_EARTH + altKm;
+  return Math.sqrt(R_EARTH * R_EARTH + Rs * Rs - 2 * R_EARTH * Rs * Math.cos(gamma));
+}
 // Sun altitude (degrees) at home for a given subsolar point: 90° minus the angle to it.
 function sunAltitudeAt(subLat, subLon) {
   return 90 - angularDist(HOME.lat, HOME.lon, subLat, subLon);
@@ -681,6 +688,8 @@ async function update() {
     const sunAlt = sunAltitudeAt(d.solar_lat, ((d.solar_lon + 180) % 360 + 360) % 360 - 180);
     const visibleNow = elev >= MIN_ELEV && sunAlt < DARK_SUN && sunlit;
     updateVisibility(visibleNow);
+    document.getElementById("s-dist").textContent =
+      Math.round(slantRange(lat, lon, d.altitude)).toLocaleString() + " km";
 
     // Mission data
     document.getElementById("m-lat").textContent = lat.toFixed(2) + "°";
