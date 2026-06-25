@@ -18,12 +18,15 @@ Use this skill when working with GitHub or reviewing a repository connected to G
 4. Prefer read-only inspection unless the user explicitly asks for a write action.
 5. Do not create branches, issues, pull requests, releases, tags, commits, or pushes unless explicitly instructed.
 6. Before any GitHub write action, explain exactly what will change and ask for confirmation.
-7. After review, summarize:
+7. Do not claim that a file, README, workflow, config, or branch is missing unless you have explicitly checked for it.
+8. If making recommendations, clearly label them as recommendations, not findings, unless verified.
+9. After review, summarize:
    - repository name
    - current branch
    - sync status
    - latest commits
    - open issues or pull requests if relevant
+   - verified findings
    - recommended next action
 
 ## Safe default behavior
