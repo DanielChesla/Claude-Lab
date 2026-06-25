@@ -181,6 +181,19 @@
   }
   .map-legend b { color: #e6edf3; font-weight: 600; }
   .sun-state { color: var(--amber); font-weight: 700; }
+  .home-marker { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .home-marker .pin {
+    width: 11px; height: 11px; border-radius: 50%;
+    background: #ff5d5d; border: 1.5px solid #fff;
+    box-shadow: 0 0 8px 1px rgba(255,93,93,.9);
+  }
+  .home-marker .lbl {
+    color: #fff; font-size: .7rem; font-weight: 700;
+    text-shadow: 0 0 3px #000, 0 1px 2px #000;
+  }
+  .v.vis-yes { color: var(--green); }
+  .v.vis-no  { color: var(--muted); }
+  #s-visible-label.next { color: var(--amber); }
 
   @media (max-width: 760px) {
     .main { flex-direction: column; }
@@ -211,6 +224,7 @@
       <div class="stat"><div class="v" id="s-crew">—</div><div class="l">Crew</div></div>
       <div class="stat"><div class="v amber" id="s-orbits">—</div><div class="l">Orbits today</div></div>
       <div class="stat"><div class="v" id="s-sun">—</div><div class="l">Sunlight</div></div>
+      <div class="stat"><div class="v" id="s-visible">—</div><div class="l" id="s-visible-label">Visible (Home)</div></div>
     </div>
   </header>
 
@@ -264,15 +278,23 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="https://unpkg.com/satellite.js@5.0.0/dist/satellite.min.js"
+        integrity="sha256-JywknSRIPUr6pcomdmHpLyDv+mxP0cG7anOtzfBRyjo=" crossorigin=""></script>
 <script>
 "use strict";
 
 /* ===================== Config ===================== */
 const ISS_API   = "https://api.wheretheiss.at/v1/satellites/25544";
+const TLE_API   = "https://api.wheretheiss.at/v1/satellites/25544/tles";
 const ASTROS_API = "http://api.open-notify.org/astros.json"; // HTTP-only; may be blocked
 const MAX_TRAIL = 200;
 const UPDATE_MS = 5000;
 const GEO_MIN_MS = 15000; // Nominatim rate limit
+
+// Home location: Marathon, FL
+const HOME = { lat: 24.7136, lon: -81.0905, name: "Marathon, FL" };
+const MIN_ELEV = 10;   // ISS must be ≥10° above the horizon to count as "up"
+const DARK_SUN = -6;   // observer sky must be ≥6° past sunset (civil twilight)
 
 // Offline fallback crew (used if the live HTTP feed is blocked by the browser)
 const FALLBACK_CREW = [
@@ -286,6 +308,8 @@ let map, marker, trailLayer, termFill, termDay, termLine;
 let centeredOnce = false;
 let lastGeo = 0;
 let locName = "Locating…";
+let satrec = null;           // parsed TLE for orbit propagation
+let nextPass = null;         // cached Date of next visible pass from home
 
 /* ===================== Map setup ===================== */
 function initMap() {
@@ -302,11 +326,22 @@ function initMap() {
     opacity: 0.7
   }).addTo(map);
 
+  // Home marker (Marathon, FL)
+  const homeIcon = L.divIcon({
+    className: "",
+    html: '<div class="home-marker"><span class="pin"></span><span class="lbl">Home</span></div>',
+    iconSize: [0, 0], iconAnchor: [6, 6]
+  });
+  L.marker([HOME.lat, HOME.lon], { icon: homeIcon })
+    .addTo(map)
+    .bindPopup("🏠 " + HOME.name);
+
   // Legend
   const legend = L.control({ position: "bottomleft" });
   legend.onAdd = function () {
     const d = L.DomUtil.create("div", "map-legend");
-    d.innerHTML = '<b>🛰️ ISS</b> · <span style="color:#58a6ff">— path</span><br>' +
+    d.innerHTML = '<b>🛰️ ISS</b> · <span style="color:#58a6ff">— path</span> · ' +
+                  '<span style="color:#ff5d5d">● Home</span><br>' +
                   'Shaded = night · ISS: <span class="sun-state" id="leg-sun">—</span>';
     return d;
   };
@@ -393,6 +428,80 @@ function drawTerminator(sunLat, sunLon) {
   termFill.bringToBack();
 }
 
+/* ===================== Visibility from home ===================== */
+const R_EARTH = 6371; // km
+const D2R = Math.PI / 180;
+
+// Great-circle angular distance (degrees) between two lat/lon points.
+function angularDist(lat1, lon1, lat2, lon2) {
+  const a = lat1 * D2R, b = lat2 * D2R, d = (lon2 - lon1) * D2R;
+  const c = Math.sin(a) * Math.sin(b) + Math.cos(a) * Math.cos(b) * Math.cos(d);
+  return Math.acos(Math.min(1, Math.max(-1, c))) / D2R;
+}
+// ISS elevation angle (degrees) above the home horizon, from its ground track + altitude.
+function issElevation(issLat, issLon, altKm) {
+  const gamma = angularDist(HOME.lat, HOME.lon, issLat, issLon) * D2R;
+  return Math.atan2(Math.cos(gamma) - R_EARTH / (R_EARTH + altKm), Math.sin(gamma)) / D2R;
+}
+// Sun altitude (degrees) at home for a given subsolar point: 90° minus the angle to it.
+function sunAltitudeAt(subLat, subLon) {
+  return 90 - angularDist(HOME.lat, HOME.lon, subLat, subLon);
+}
+// Unit vector to the Sun in an Earth-centred equatorial frame (for the shadow test).
+function sunEciUnit(date) {
+  const JD = date.getTime() / 86400000 + 2440587.5;
+  const n = JD - 2451545.0;
+  const L = 280.460 + 0.9856474 * n;
+  const g = (357.528 + 0.9856003 * n) * D2R;
+  const lambda = (L + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)) * D2R;
+  const eps = (23.439 - 0.0000004 * n) * D2R;
+  return { x: Math.cos(lambda), y: Math.cos(eps) * Math.sin(lambda), z: Math.sin(eps) * Math.sin(lambda) };
+}
+// Is the ISS sunlit (not in Earth's shadow) at a given ECI position?  Cylindrical shadow model.
+function issSunlit(posEci, date) {
+  const s = sunEciUnit(date), r = posEci;
+  const dot = r.x * s.x + r.y * s.y + r.z * s.z;
+  if (dot > 0) return true; // on the sunlit side of Earth
+  const px = r.x - dot * s.x, py = r.y - dot * s.y, pz = r.z - dot * s.z;
+  return Math.sqrt(px * px + py * py + pz * pz) > R_EARTH; // clears the shadow cylinder
+}
+
+// Full visibility test at an arbitrary time using the propagated TLE.
+function visibleAt(date) {
+  if (!satrec) return false;
+  const pv = satellite.propagate(satrec, date);
+  if (!pv || !pv.position) return false;
+  const gmst = satellite.gstime(date);
+  const geo = satellite.eciToGeodetic(pv.position, gmst);
+  const latDeg = satellite.degreesLat(geo.latitude);
+  const lonDeg = satellite.degreesLong(geo.longitude);
+  const altKm = geo.height;
+  if (issElevation(latDeg, lonDeg, altKm) < MIN_ELEV) return false;        // above horizon?
+  const ss = subsolar(date);
+  if (sunAltitudeAt(ss.lat, ss.lon) > DARK_SUN) return false;              // dark enough?
+  return issSunlit(pv.position, date);                                     // ISS sunlit?
+}
+
+// Search forward for the start of the next visible pass.
+// Window is 10 days because a location can go several days with no visible
+// pass (all above-horizon passes fall in full daylight or full darkness).
+function findNextPass(fromDate) {
+  if (!satrec) return null;
+  const STEP = 30, MAX = 10 * 24 * 3600;
+  for (let t = STEP; t <= MAX; t += STEP) {
+    const d = new Date(fromDate.getTime() + t * 1000);
+    if (visibleAt(d)) return d;
+  }
+  return null;
+}
+
+async function loadTLE() {
+  try {
+    const d = await (await fetch(TLE_API)).json();
+    satrec = satellite.twoline2satrec(d.line1, d.line2);
+  } catch (e) { satrec = null; }
+}
+
 /* ===================== Reverse geocoding ===================== */
 function oceanName(lat, lon) {
   if (lat > 66) return "Arctic Ocean";
@@ -453,6 +562,46 @@ function orbitsToday() {
   return (hours / 24 * 15.5).toFixed(1);
 }
 
+/* ===================== Visibility display ===================== */
+let lastPassSearch = 0;
+function fmtPass(date) {
+  const days = (date - Date.now()) / 86400000;
+  const opts = days >= 6
+    ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
+    : { weekday: "short", hour: "numeric", minute: "2-digit" };
+  return date.toLocaleString([], opts);
+}
+function updateVisibility(visibleNow) {
+  const v = document.getElementById("s-visible");
+  const l = document.getElementById("s-visible-label");
+  if (visibleNow) {
+    nextPass = null;
+    v.textContent = "Yes 👀";
+    v.className = "v vis-yes";
+    l.textContent = "Visible (Home)";
+    l.className = "l";
+    return;
+  }
+  v.textContent = "No";
+  v.className = "v vis-no";
+  // Refresh the next-pass estimate if we don't have a future one yet
+  // (throttled — the 10-day search is comparatively expensive).
+  if (satrec && (!nextPass || nextPass.getTime() <= Date.now()) && Date.now() - lastPassSearch > 60000) {
+    lastPassSearch = Date.now();
+    nextPass = findNextPass(new Date());
+  }
+  if (nextPass) {
+    l.textContent = "Next: " + fmtPass(nextPass);
+    l.className = "l next";
+  } else if (satrec) {
+    l.textContent = "No pass in 10 days";
+    l.className = "l";
+  } else {
+    l.textContent = "Visible (Home)";
+    l.className = "l";
+  }
+}
+
 /* ===================== Main update ===================== */
 async function update() {
   try {
@@ -478,6 +627,12 @@ async function update() {
     const legSun = document.getElementById("leg-sun");
     if (legSun) legSun.textContent = sunlit ? "☀️ sunlit" : "🌑 shadow";
 
+    // Visible from home? (ISS above horizon + Marathon dark + ISS sunlit)
+    const elev = issElevation(lat, lon, d.altitude);
+    const sunAlt = sunAltitudeAt(d.solar_lat, ((d.solar_lon + 180) % 360 + 360) % 360 - 180);
+    const visibleNow = elev >= MIN_ELEV && sunAlt < DARK_SUN && sunlit;
+    updateVisibility(visibleNow);
+
     // Mission data
     document.getElementById("m-lat").textContent = lat.toFixed(2) + "°";
     document.getElementById("m-lon").textContent = lon.toFixed(2) + "°";
@@ -497,8 +652,10 @@ async function update() {
 /* ===================== Boot ===================== */
 initMap();
 loadCrew();
-update();
+loadTLE().then(update);                 // load orbit data, then first update
+update();                              // also paint immediately from live position
 setInterval(update, UPDATE_MS);
+setInterval(loadTLE, 6 * 60 * 60 * 1000); // refresh TLE every 6h
 
 // Dismiss the loading modal after 10 seconds on first load
 setTimeout(() => {
