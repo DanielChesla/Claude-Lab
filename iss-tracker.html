@@ -125,6 +125,42 @@
   }
   footer a { color: var(--accent); text-decoration: none; }
 
+  /* ---- Loading modal (planet orbiting the sun) ---- */
+  .loader-overlay {
+    position: fixed; inset: 0; z-index: 9999;
+    background: radial-gradient(circle at 50% 40%, #0d1320 0%, #060810 70%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 26px;
+    transition: opacity .6s ease;
+  }
+  .loader-overlay.hidden { opacity: 0; pointer-events: none; }
+  .solar { position: relative; width: 150px; height: 150px; }
+  .sun {
+    position: absolute; top: 50%; left: 50%; width: 48px; height: 48px;
+    margin: -24px 0 0 -24px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #fff3b0, #f5c542 55%, #e8920f);
+    box-shadow: 0 0 26px 7px rgba(245,197,66,.75), 0 0 60px 18px rgba(245,197,66,.35);
+    animation: sun-pulse 2.8s ease-in-out infinite;
+  }
+  @keyframes sun-pulse {
+    0%, 100% { box-shadow: 0 0 26px 7px rgba(245,197,66,.7), 0 0 60px 18px rgba(245,197,66,.30); }
+    50%      { box-shadow: 0 0 34px 10px rgba(245,197,66,.9), 0 0 78px 24px rgba(245,197,66,.45); }
+  }
+  .orbit {
+    position: absolute; inset: 0;
+    border: 1px dashed rgba(255,255,255,.18); border-radius: 50%;
+    animation: orbit 2.6s linear infinite;
+  }
+  .planet {
+    position: absolute; top: -8px; left: 50%; margin-left: -8px;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #a9d8ff, #58a6ff 70%);
+    box-shadow: 0 0 12px rgba(88,166,255,.85);
+  }
+  @keyframes orbit { to { transform: rotate(360deg); } }
+  .loader-text { font-size: 1.05rem; font-weight: 600; letter-spacing: .01em; }
+  .loader-sub { font-size: .82rem; color: var(--muted); margin-top: -16px; }
+
   /* ---- Leaflet overrides (dark) ---- */
   .leaflet-bar a, .leaflet-control-attribution {
     background: #161b22 !important;
@@ -155,6 +191,15 @@
 </style>
 </head>
 <body>
+  <div id="loader" class="loader-overlay">
+    <div class="solar">
+      <div class="sun"></div>
+      <div class="orbit"><span class="planet"></span></div>
+    </div>
+    <div class="loader-text">Acquiring ISS telemetry…</div>
+    <div class="loader-sub">Establishing live orbital track</div>
+  </div>
+
   <header>
     <div class="brand">
       <span class="live-dot"></span>
@@ -237,7 +282,7 @@ const FALLBACK_CREW = [
 
 /* ===================== State ===================== */
 const positions = [];        // [[lat, lon], ...] up to MAX_TRAIL
-let map, marker, trailLayer, termFill, termLine;
+let map, marker, trailLayer, termFill, termDay, termLine;
 let centeredOnce = false;
 let lastGeo = 0;
 let locName = "Locating…";
@@ -324,14 +369,21 @@ function drawTerminator(sunLat, sunLon) {
     const lat = Math.atan(-Math.cos((lon - sLon) * rad) / tanDecl) / rad;
     line.push([lat, lon]);
   }
-  // Night hemisphere = the pole opposite the sun's declination
+  // Night hemisphere = the pole opposite the sun's declination; day = the other pole
   const darkPole = decl > 0 ? -90 : 90;
-  const fill = line.concat([[darkPole, 180], [darkPole, -180]]);
+  const dayPole  = -darkPole;
+  const nightFill = line.concat([[darkPole, 180], [darkPole, -180]]);
+  const dayFill   = line.concat([[dayPole, 180], [dayPole, -180]]);
 
   if (termFill) termFill.remove();
+  if (termDay) termDay.remove();
   if (termLine) termLine.remove();
-  termFill = L.polygon(fill, { stroke: false, fillColor: "#000814", fillOpacity: 0.45, interactive: false }).addTo(map);
-  termLine = L.polyline(line, { color: "#f5c542", weight: 1, opacity: 0.45, dashArray: "4 7", interactive: false }).addTo(map);
+  // Day side: warm light wash to lift the daylit hemisphere
+  termDay = L.polygon(dayFill, { stroke: false, fillColor: "#ffe9a8", fillOpacity: 0.16, interactive: false }).addTo(map);
+  // Night side: deep, near-opaque shade for strong day/night contrast
+  termFill = L.polygon(nightFill, { stroke: false, fillColor: "#000208", fillOpacity: 0.72, interactive: false }).addTo(map);
+  termLine = L.polyline(line, { color: "#f5c542", weight: 1.2, opacity: 0.6, dashArray: "4 7", interactive: false }).addTo(map);
+  termDay.bringToBack();
   termFill.bringToBack();
 }
 
@@ -441,6 +493,14 @@ initMap();
 loadCrew();
 update();
 setInterval(update, UPDATE_MS);
+
+// Dismiss the loading modal after 10 seconds on first load
+setTimeout(() => {
+  const l = document.getElementById("loader");
+  if (!l) return;
+  l.classList.add("hidden");
+  setTimeout(() => l.remove(), 600);
+}, 10000);
 </script>
 </body>
 </html>
