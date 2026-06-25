@@ -381,7 +381,7 @@ function drawTerminator(sunLat, sunLon) {
   // Day side: warm light wash to lift the daylit hemisphere
   termDay = L.polygon(dayFill, { stroke: false, fillColor: "#ffe9a8", fillOpacity: 0.16, interactive: false }).addTo(map);
   // Night side: deep, near-opaque shade for strong day/night contrast
-  termFill = L.polygon(nightFill, { stroke: false, fillColor: "#000208", fillOpacity: 0.72, interactive: false }).addTo(map);
+  termFill = L.polygon(nightFill, { stroke: false, fillColor: "#00050e", fillOpacity: 0.585, interactive: false }).addTo(map);
   termLine = L.polyline(line, { color: "#f5c542", weight: 1.2, opacity: 0.6, dashArray: "4 7", interactive: false }).addTo(map);
   termDay.bringToBack();
   termFill.bringToBack();
