@@ -25,8 +25,11 @@
  *   - data-testid-lock : element's existing data-testid value is preserved.
  *
  * Usage:
- *   node add_testids.js <file ...> [--dry-run] [--stable]
+ *   node add_testids.js <file ...> [--all] [--prefix <ns>] [--dry-run] [--stable]
  *                                  [--check] [--json] [--manifest <path>]
+ *
+ *   --all : tag every rendered element (not just interactive) for presence
+ *           assertions; skips only structural tags (html/head/body/script/...).
  *
  * No dependencies. Only opening tags are edited (formatting preserved);
  * <script>, <style>, and comments are skipped.
@@ -35,7 +38,13 @@
 const fs = require("fs");
 
 const TARGET_TAGS = new Set(["input", "select", "textarea", "button", "a"]);
-const VOID_TAGS = new Set(["input"]);
+// Elements with no text content (used to skip visible-text lookup).
+const VOID_TAGS = new Set(["input", "img", "br", "hr", "area", "embed", "source", "track", "wbr", "col"]);
+// In --all mode, tag every rendered element except these non-content / structural ones.
+const EXCLUDE_TAGS = new Set([
+  "html", "head", "body", "meta", "link", "script", "style", "title", "base",
+  "noscript", "template", "br", "wbr", "source", "track", "param", "col",
+]);
 
 /* ---------- text helpers ---------- */
 function slugify(s, maxLen = 40) {
@@ -141,7 +150,8 @@ function computeShortname(el, ctx) {
 
   const chain = [
     ["label", label], ["aria-labelledby", albl], ["name", a.name], ["id", a.id],
-    ["placeholder", a.placeholder], ["aria-label", a["aria-label"]], ["title", a.title], ["text", vis]
+    ["placeholder", a.placeholder], ["aria-label", a["aria-label"]], ["title", a.title],
+    ["alt", a.alt], ["text", vis]
   ];
   for (const [source, val] of chain) if (val && slugify(val)) return { source, shortname: slugify(val) };
   const anchor = nearestAnchor(ctx.anchors, el.start);
@@ -150,16 +160,19 @@ function computeShortname(el, ctx) {
 }
 
 /* ---------- core ---------- */
-function collectElements(html, masked) {
+function collectElements(html, masked, opts) {
   const els = [];
   const re = /<([a-zA-Z][\w:-]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>/g;
   let m;
   while ((m = re.exec(masked))) {
     const tag = m[1].toLowerCase();
     const attrs = parseAttrs(m[2]);
-    const isTarget = TARGET_TAGS.has(tag) || "role" in attrs;
+    // --all: every rendered element except structural/non-content tags.
+    // default: interactive elements + anything with a role.
+    const isTarget = opts.all ? !EXCLUDE_TAGS.has(tag) : (TARGET_TAGS.has(tag) || "role" in attrs);
     if (!isTarget) continue;
-    if (tag === "input" && (attrs.type || "").toLowerCase() === "hidden") continue; // #1 skip hidden
+    // Skip hidden inputs in the default scope; in --all, presence may matter so keep them.
+    if (!opts.all && tag === "input" && (attrs.type || "").toLowerCase() === "hidden") continue;
     const start = m.index, end = start + m[0].length;
     els.push({ tag, attrs, start, end, rawTag: html.slice(start, end), viaRole: !TARGET_TAGS.has(tag) });
   }
@@ -182,7 +195,7 @@ function transform(html, opts) {
   const masked = maskRegions(html);
   const { labels, byFor } = collectLabels(html);
   const ctx = { html, labels, byFor, idText: buildIdText(html, masked), anchors: collectAnchors(html) };
-  const els = collectElements(html, masked);
+  const els = collectElements(html, masked, opts);
 
   // ---- check mode: report missing / duplicate, no edits ----
   if (opts.check) {
@@ -250,14 +263,22 @@ function transform(html, opts) {
 
   // ---- build edits + results + warnings ----
   const edits = [];
+  let fallbackCount = 0;
   for (const el of managed) {
     if (!(el.action === "skipped")) {
       if (el.existing !== el.testid) edits.push({ start: el.start, end: el.end, newTag: setTestid(el.rawTag, el.testid) });
     }
     results.push({ ...meta(el), testid: el.testid, action: el.kept ? "kept" : "generated", source: el.source });
-    if (el.source === "fallback") warnings.push(`${el.testid}: no label/name/text found — used fallback "field"`);
-    if (el.viaRole) warnings.push(`${el.testid}: matched via role; fieldtype is the raw tag "${el.tag}"`);
+    if (el.source === "fallback") {
+      fallbackCount++;
+      // In --all mode many text-less containers fall back; summarize instead of per-element noise.
+      if (!opts.all) warnings.push(`${el.testid}: no label/name/text found — used fallback "field"`);
+    }
+    // The generic-tag note only matters in default scope (role-matched). In --all,
+    // tag-name fieldtypes are expected, so don't warn per element.
+    if (!opts.all && el.viaRole) warnings.push(`${el.testid}: matched via role; fieldtype is the raw tag "${el.tag}"`);
   }
+  if (opts.all && fallbackCount) warnings.push(`${fallbackCount} element(s) had no usable identity — numbered as field-<tag>-N`);
 
   edits.sort((a, b) => b.start - a.start);
   let out = html;
@@ -273,7 +294,8 @@ function meta(el) {
 function main() {
   const argv = process.argv.slice(2);
   const opts = { dryRun: argv.includes("--dry-run"), stable: argv.includes("--stable"),
-                 check: argv.includes("--check"), json: argv.includes("--json"), manifest: null, prefix: null };
+                 check: argv.includes("--check"), json: argv.includes("--json"),
+                 all: argv.includes("--all"), manifest: null, prefix: null };
   const mi = argv.indexOf("--manifest");
   if (mi !== -1) opts.manifest = argv[mi + 1];
   const pi = argv.indexOf("--prefix");
@@ -281,7 +303,7 @@ function main() {
   const skip = new Set([opts.manifest, opts.prefix]);
   const files = argv.filter((a) => !a.startsWith("--") && !skip.has(a));
   if (!files.length) {
-    console.error("Usage: node add_testids.js <file ...> [--dry-run] [--stable] [--check] [--json] [--manifest <path>]");
+    console.error("Usage: node add_testids.js <file ...> [--all] [--prefix <ns>] [--dry-run] [--stable] [--check] [--json] [--manifest <path>]");
     process.exit(1);
   }
 

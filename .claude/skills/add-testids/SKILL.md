@@ -45,13 +45,14 @@ taken, and which source the shortname came from) plus any ⚠ warnings.
 | `--json` | Emit machine-readable JSON instead of the text summary. |
 | `--manifest <path>` | Write a JSON manifest (`testid → tag, source, selector`) — handy for then writing Playwright/Cypress tests. |
 | `--prefix <ns>` | Prepend a namespace to every testid (`<ns>-<shortname>-<fieldtype>-<n>`). Use for **shared fragments merged into one DOM** (e.g. a client-side-included nav/footer) so their testids don't collide. Example: tag a header with `--prefix nav` and a footer with `--prefix footer`. |
+| `--all` | Tag **every rendered element**, not just interactive ones — for tests that assert non-actionable elements are present (headings, images, sections, status banners, etc.). Skips only structural/non-content tags (`html`, `head`, `body`, `script`, `style`, `meta`, `link`, …). Includes hidden inputs in this mode. Expect a lot more testids; combine with `--prefix` for shared fragments. |
 
 ## Rules (locked spec)
 
 | Part | Behavior |
 |------|----------|
-| **Targets** | `<input>`, `<select>`, `<textarea>`, `<button>`, `<a>`, and any element with a `role`. `<input type="hidden">` is skipped. |
-| **shortname** | first non-empty of: `<label>` → `aria-labelledby` → `name` → `id` → `placeholder` → `aria-label` → `title` → visible text → nearest heading/`<legend>` → `"field"`, slugified to kebab-case |
+| **Targets** | Default: `<input>`, `<select>`, `<textarea>`, `<button>`, `<a>`, and any element with a `role` (`<input type="hidden">` skipped). With `--all`: every rendered element except structural/non-content tags. |
+| **shortname** | first non-empty of: `<label>` → `aria-labelledby` → `name` → `id` → `placeholder` → `aria-label` → `title` → `alt` → visible text → nearest heading/`<legend>` → `"field"`, slugified to kebab-case |
 | **fieldtype** | input's `type` (untyped input → `text`); `<a>` → `link`; `select`/`textarea`/`button` → tag name; other role-bearing tags → tag name |
 | **increment** | per `shortname-fieldtype`. Default: regenerate, numbered from `1` in document order (idempotent). `--stable`: keep existing numbers, fill new ones. |
 
