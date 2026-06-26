@@ -168,9 +168,14 @@ function collectElements(html, masked) {
 
 function setTestid(rawTag, value) {
   const cleaned = rawTag.replace(/\s+data-testid\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>`]+)/gi, "");
-  return cleaned.endsWith("/>")
-    ? cleaned.slice(0, -2).replace(/\s*$/, "") + ` data-testid="${value}" />`
-    : cleaned.slice(0, -1).replace(/\s*$/, "") + ` data-testid="${value}">`;
+  const selfClose = cleaned.endsWith("/>");
+  const close = selfClose ? "/>" : ">";
+  const body = cleaned.slice(0, cleaned.length - close.length); // attrs (may end in whitespace/newline)
+  const trail = (body.match(/\s*$/) || [""])[0];                // preserve trailing whitespace before close
+  const core = body.slice(0, body.length - trail.length);
+  // Insert after the last attribute, keeping any original whitespace before the
+  // close bracket so multi-line tags aren't collapsed.
+  return core + ` data-testid="${value}"` + trail + close;
 }
 
 function transform(html, opts) {
