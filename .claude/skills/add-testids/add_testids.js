@@ -203,13 +203,16 @@ function transform(html, opts) {
   const managed = [];
   const results = [];
   const warnings = [];
+  // Optional namespace prefix — use for shared fragments (nav, footer) that get
+  // merged into one DOM, so their testids don't collide across files.
+  const prefix = opts.prefix ? slugify(opts.prefix) + "-" : "";
 
   for (const el of els) {
     const existing = el.attrs["data-testid"];
     if ("data-testid-skip" in el.attrs) { results.push({ ...meta(el), testid: existing || null, action: "skipped" }); continue; }
     const { source, shortname } = computeShortname(el, ctx);
     const ftype = fieldType(el.tag, el.attrs);
-    el.key = `${shortname}-${ftype}`; el.source = source; el.shortname = shortname; el.ftype = ftype;
+    el.key = `${prefix}${shortname}-${ftype}`; el.source = source; el.shortname = shortname; el.ftype = ftype;
 
     if ("data-testid-lock" in el.attrs && existing) {
       // reserve its number if it matches the key pattern, so we don't collide
@@ -270,10 +273,12 @@ function meta(el) {
 function main() {
   const argv = process.argv.slice(2);
   const opts = { dryRun: argv.includes("--dry-run"), stable: argv.includes("--stable"),
-                 check: argv.includes("--check"), json: argv.includes("--json"), manifest: null };
+                 check: argv.includes("--check"), json: argv.includes("--json"), manifest: null, prefix: null };
   const mi = argv.indexOf("--manifest");
   if (mi !== -1) opts.manifest = argv[mi + 1];
-  const skip = new Set([opts.manifest]);
+  const pi = argv.indexOf("--prefix");
+  if (pi !== -1) opts.prefix = argv[pi + 1];
+  const skip = new Set([opts.manifest, opts.prefix]);
   const files = argv.filter((a) => !a.startsWith("--") && !skip.has(a));
   if (!files.length) {
     console.error("Usage: node add_testids.js <file ...> [--dry-run] [--stable] [--check] [--json] [--manifest <path>]");

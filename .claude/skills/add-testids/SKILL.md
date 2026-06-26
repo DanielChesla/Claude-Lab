@@ -44,6 +44,7 @@ taken, and which source the shortname came from) plus any ⚠ warnings.
 | `--check` | Audit only: report elements missing a testid and any duplicate values. Writes nothing; **exits non-zero** if issues found (good for CI). |
 | `--json` | Emit machine-readable JSON instead of the text summary. |
 | `--manifest <path>` | Write a JSON manifest (`testid → tag, source, selector`) — handy for then writing Playwright/Cypress tests. |
+| `--prefix <ns>` | Prepend a namespace to every testid (`<ns>-<shortname>-<fieldtype>-<n>`). Use for **shared fragments merged into one DOM** (e.g. a client-side-included nav/footer) so their testids don't collide. Example: tag a header with `--prefix nav` and a footer with `--prefix footer`. |
 
 ## Rules (locked spec)
 
@@ -73,3 +74,7 @@ Label association covers `<label for="id">` and wrapping `<label><input>…</lab
 - Warnings flag weak results: a `field` fallback (no usable label) or a generic
   fieldtype from a role-bearing non-standard tag (e.g. `…-div-1`). If one looks
   wrong for the user's case, surface it.
+- Testids are unique **per file**. If a site merges multiple HTML fragments into
+  one DOM at runtime (e.g. client-side-included nav/footer), tag each shared
+  fragment with a distinct `--prefix` to avoid cross-file collisions in the
+  rendered page.
