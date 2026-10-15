@@ -45,6 +45,12 @@
   .cmf .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap }
   .cmf .count { font-size:12px; color:var(--muted) }
   .cmmsg { font-size:13px } .cmmsg.ok { color:var(--done) } .cmmsg.err { color:var(--err) }
+  .ro { margin-top:10px }
+  .ro .btn2 { background:#fff; color:var(--accent); border:1px solid var(--accent) }
+  .ro form { display:none; gap:8px; margin-top:8px }
+  .ro.open form { display:grid }
+  .ro textarea { font:inherit; padding:8px 10px; border:1px solid #cbd5e1; border-radius:7px; width:100%; min-height:70px; resize:vertical }
+  .pending { display:inline-block; font-size:12px; font-weight:600; padding:2px 8px; border-radius:999px; background:#fef3c7; color:#92400e }
   footer { max-width:860px; margin:24px auto 0; padding:0 16px; color:var(--muted); font-size:12px }
   @media (max-width:640px) { form { grid-template-columns:1fr } button { width:100% } dl { grid-template-columns:1fr } }
 </style>
@@ -82,7 +88,22 @@
 
   let uploadRules = null;   // set from each lookup response
   let commentRules = null;
+  let reopenRules = null;
   let lastQuery = '';
+
+  function reopenSection(r) {
+    if (!reopenRules || !reopenRules.enabled) return '';
+    const closed = reopenRules.statuses.some((s) => s.toLowerCase() === String(r.status).toLowerCase());
+    if (!closed) return '';
+    if (r.labels.includes(reopenRules.label)) return `<div class="ro"><span class="pending">Reopen request pending</span></div>`;
+    return `<div class="ro" data-key="${esc(r.key)}">
+      <button type="button" class="btn2 ro-toggle">Request ticket be reopened</button>
+      <form class="rof" data-key="${esc(r.key)}">
+        <textarea name="reason" maxlength="${reopenRules.maxChars}" placeholder="Why should this ticket be reopened? The assignee will be emailed with the ticket number, your email, and this reason." required></textarea>
+        <div class="row"><button type="submit">Send reopen request</button><button type="button" class="btn2 ro-cancel">Cancel</button></div>
+        <div class="cmmsg"></div>
+      </form></div>`;
+  }
 
   function commentSection(r) {
     if (!commentRules || !commentRules.enabled) return '';
@@ -136,6 +157,7 @@
       ${comments}
       ${commentSection(r)}
       ${uploadSection(r)}
+      ${reopenSection(r)}
     </div>`;
   }
 
@@ -147,6 +169,7 @@
       if (!r.ok) { out.innerHTML = `<div class="msg err">${esc(data.error || ('Error ' + r.status))}</div>`; return; }
       uploadRules = data.uploads || null;
       commentRules = data.comments || null;
+      reopenRules = data.reopen || null;
       lastQuery = query;
       const head = data.queryType === 'case'
         ? `<div class="msg">${data.results.length} ticket${data.results.length === 1 ? '' : 's'} linked to Salesforce case ${esc(data.query)}</div>` : '';
@@ -189,9 +212,32 @@
     } finally { btn.disabled = false; }
   }
 
+  // Reopen request: toggle the reason box, then post.
+  out.addEventListener('click', (e) => {
+    const t = e.target;
+    if (t.classList.contains('ro-toggle')) { t.closest('.ro').classList.add('open'); t.closest('.ro').querySelector('textarea').focus(); }
+    if (t.classList.contains('ro-cancel')) { t.closest('.ro').classList.remove('open'); }
+  });
+  async function submitReopen(f) {
+    const msg = f.querySelector('.cmmsg'), btn = f.querySelector('button[type=submit]'), ta = f.querySelector('textarea');
+    const reason = ta.value.trim(), email = emailEl.value.trim();
+    if (!reason) { msg.className = 'cmmsg err'; msg.textContent = 'Enter a reason.'; return; }
+    btn.disabled = true; msg.className = 'cmmsg'; msg.textContent = 'Sending…';
+    try {
+      const r = await fetch('/api/reopen', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email, key: f.dataset.key, reason }) });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) { msg.className = 'cmmsg err'; msg.textContent = data.error || ('Error ' + r.status); return; }
+      msg.className = 'cmmsg ok'; msg.textContent = `Reopen request sent for ${data.key}.`;
+      setTimeout(() => runLookup(email, lastQuery, true), 1200);
+    } catch (err) {
+      msg.className = 'cmmsg err'; msg.textContent = 'Network error. Try again.';
+    } finally { btn.disabled = false; }
+  }
+
   // Attachment uploads (forms are created inside result cards).
   out.addEventListener('submit', async (e) => {
     const f = e.target;
+    if (f.classList.contains('rof')) { e.preventDefault(); return submitReopen(f); }
     if (f.classList.contains('cmf')) { e.preventDefault(); return submitComment(f); }
     if (!f.classList.contains('upf')) return;
     e.preventDefault();

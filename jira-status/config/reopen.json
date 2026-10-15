@@ -1,0 +1,8 @@
+{
+  "enabled": true,
+  "statuses": ["Done", "Deployed to Production"],
+  "label": "reopen-requested",
+  "maxChars": 1000,
+  "perEmailPerHour": 5,
+  "headerTemplate": "Reopen requested by {email} via the Jira status page"
+}

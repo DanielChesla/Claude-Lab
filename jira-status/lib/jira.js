@@ -11,6 +11,7 @@ export const allowedProjects = require('../config/projects.json').map((p) => Str
 export const settings = require('../config/settings.json');
 export const uploads = require('../config/uploads.json');
 export const comments = require('../config/comments.json');
+export const reopen = require('../config/reopen.json');
 
 // jiraBaseUrl is the site (used for "Open in Jira" links). jiraApiBaseUrl is where REST calls go:
 // Atlassian service-account tokens only work through https://api.atlassian.com/ex/jira/<cloudId>,
@@ -24,7 +25,7 @@ export const MAX_CASE_MATCHES = Number(settings.maxCaseMatches ?? 20);
 
 export const FIELDS = [
   'summary', 'description', 'status', 'issuetype', 'priority', 'created', 'updated',
-  'fixVersions', 'resolution', 'comment', SPRINT_FIELD, SF_FIELD,
+  'fixVersions', 'resolution', 'labels', 'assignee', 'comment', SPRINT_FIELD, SF_FIELD,
 ];
 
 // ---------- Postgres (lookup log + rate limits) ----------
@@ -69,7 +70,39 @@ export async function ensureSchema() {
     result text NOT NULL
   )`;
   await sql`CREATE INDEX IF NOT EXISTS comments_email_created_idx ON comments (email, created_at DESC)`;
+  await sql`CREATE TABLE IF NOT EXISTS reopen_requests (
+    id bigserial PRIMARY KEY,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    ip text NOT NULL,
+    email text NOT NULL,
+    issue_key text NOT NULL,
+    status text,
+    chars int NOT NULL,
+    comment_id text,
+    label_added boolean NOT NULL DEFAULT false,
+    result text NOT NULL
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS reopen_email_created_idx ON reopen_requests (email, created_at DESC)`;
   schemaReady = true;
+}
+
+export async function reopensThisHour(email) {
+  if (!sql) return 0;
+  await ensureSchema();
+  const rows = await sql`SELECT count(*)::int AS n FROM reopen_requests
+                         WHERE email = ${email} AND result = 'requested' AND created_at > now() - interval '1 hour'`;
+  return rows[0]?.n ?? 0;
+}
+
+export async function logReopen(row) {
+  if (!sql) { console.log('reopen', JSON.stringify(row)); return; }
+  try {
+    await ensureSchema();
+    await sql`INSERT INTO reopen_requests (ip, email, issue_key, status, chars, comment_id, label_added, result)
+              VALUES (${row.ip}, ${row.email}, ${row.issueKey}, ${row.status || null}, ${row.chars}, ${row.commentId || null}, ${!!row.labelAdded}, ${row.result})`;
+  } catch (err) {
+    console.error('reopen log write failed', err);
+  }
 }
 
 export async function commentsThisHour(email) {
@@ -202,6 +235,11 @@ export function jiraClient(token) {
         method: 'POST', headers: headers({ 'Content-Type': 'application/json' }), body: JSON.stringify(body),
       }));
     },
+    async put(pathname, body) {
+      return assertAuthenticated(await fetch(`${API_BASE}${pathname}`, {
+        method: 'PUT', headers: headers({ 'Content-Type': 'application/json' }), body: JSON.stringify(body),
+      }));
+    },
     // multipart upload; fetch sets the multipart Content-Type boundary itself.
     async postForm(pathname, formData) {
       return assertAuthenticated(await fetch(`${API_BASE}${pathname}`, {
@@ -310,6 +348,8 @@ export function formatIssue(issue) {
     created: f.created || null,
     updated: f.updated || null,
     resolution: f.resolution?.name || null,
+    labels: Array.isArray(f.labels) ? f.labels : [],
+    assignee: f.assignee?.displayName || null,
     fixVersions: (f.fixVersions || []).map((v) => ({ name: v.name, released: !!v.released, releaseDate: v.releaseDate || null })),
     sprints: (f[SPRINT_FIELD] || []).map((s) => ({ name: s.name, state: s.state })),
     salesforceCases: parseCases(f[SF_FIELD]),
@@ -331,5 +371,14 @@ export function commentRules() {
   return {
     enabled: comments.enabled !== false && !!process.env.JIRA_API_TOKEN,
     maxChars: Number(comments.maxChars),
+  };
+}
+
+export function reopenRules() {
+  return {
+    enabled: reopen.enabled !== false && !!process.env.JIRA_API_TOKEN,
+    statuses: reopen.statuses,
+    label: reopen.label,
+    maxChars: Number(reopen.maxChars),
   };
 }

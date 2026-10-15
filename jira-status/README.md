@@ -13,13 +13,15 @@ public/index.html          the page
 api/lookup.js              POST /api/lookup — validates, rate-limits, queries Jira, logs
 api/attach.js              POST /api/attach — uploads files to a ticket + attribution comment
 api/comment.js             POST /api/comment — adds a plain-text comment with an author header
+api/reopen.js              POST /api/reopen — comment + label asking for a closed ticket to be reopened
 lib/jira.js                shared config loading, Postgres log/limits, Jira client, formatting
 config/allowed-domains.json  email domains allowed to use the page
 config/projects.json         Jira project keys that can be looked up
 config/settings.json         Jira base URL, field IDs, rate limit
 config/uploads.json          upload size cap, file count, allowed extensions, per-email hourly limit
 config/comments.json         comment length cap, per-email hourly limit, author header text
-db/schema.sql              lookups, uploads and comments tables (created automatically on first run)
+config/reopen.json           statuses that allow a reopen request, label, reason cap, hourly limit
+db/schema.sql              lookups, uploads, comments, reopen_requests tables (created automatically)
 ```
 
 ## How it works
@@ -63,6 +65,54 @@ posts the comment via `POST /rest/api/3/issue/{key}/comment`. The first line of 
 bold header from `headerTemplate` ("Comment from someone@profitsolv.com via the Jira status
 page"), followed by the user's text as plain paragraphs. Every attempt is logged to the
 `comments` table. Set `"enabled": false` to hide the box and refuse comments.
+
+### Reopen requests
+
+When a ticket's status is one of the names in `config/reopen.json` (`Done`, `Deployed to
+Production`), the card shows **Request ticket be reopened**. Clicking it reveals a reason box.
+Submitting posts to `/api/reopen`, which, after the usual checks:
+
+1. Re-reads the ticket and refuses (409) if the status is not in the list or the ticket already
+   carries the `reopen-requested` label ("already pending").
+2. Enforces 5 requests per rolling hour per email and a 1,000-character reason.
+3. Posts a comment whose bold first line is "Reopen requested by someone@profitsolv.com via the
+   Jira status page", followed by the reason.
+4. Adds the `reopen-requested` label (needs Edit Issues on the project).
+5. Logs to `reopen_requests`.
+
+**The status is never changed by the page.** Reopening remains an engineering decision.
+
+The email to the assignee is sent by a **Jira Automation rule**, not by the page. Create it once
+(Jira → Automation → Create rule) with:
+
+- **Trigger:** Issue commented.
+- **Condition:** Comment → *Comment body contains* `Reopen requested by`. Optionally also
+  *Issue fields condition* → Labels contains `reopen-requested`.
+- **If / else block:**
+  - *If* Assignee is not empty → **Send email**, To: `{{issue.assignee.emailAddress}}`.
+  - *Else* → **Send email**, To: `{{issue.reporter.emailAddress}}`.
+- **Email subject:** `Reopen requested: {{issue.key}} {{issue.summary}}`
+- **Email body (smart values):**
+
+  ```
+  A support rep has asked for {{issue.key}} to be reopened.
+
+  Ticket:    {{issue.url}}
+  Status:    {{issue.status.name}}
+  Requested: {{comment.created.format("yyyy-MM-dd HH:mm")}}
+
+  {{comment.body}}
+
+  The first line of the comment names the requestor; the rest is their reason.
+  Remove the "reopen-requested" label on the ticket once you have acted on it.
+  ```
+
+- Scope the rule to the four projects in `config/projects.json`. Actor can stay as Automation for
+  Jira.
+
+Removing the `reopen-requested` label (or changing the status) lets the page accept a new request
+for that ticket. Set `"enabled": false` in `config/reopen.json` to hide the button and refuse
+requests.
 
 ## One-time setup
 
@@ -133,6 +183,7 @@ Edit the JSON files and redeploy (push to the connected branch):
 - Change the Salesforce field, sprint field, rate limit, or max results per case → `config/settings.json`
 - Change upload size, file count, allowed extensions, hourly limit, or the attribution comment → `config/uploads.json`
 - Change comment length, hourly limit, or the author header → `config/comments.json`
+- Change which statuses allow a reopen request, the label, reason length, or hourly limit → `config/reopen.json`
 
 ## Local development
 

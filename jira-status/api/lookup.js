@@ -9,7 +9,7 @@
 
 import {
   clientIp, isAllowedEmail, classify, isRateLimited, writeLog,
-  jiraClient, lookupByKey, lookupByCase, uploadRules, commentRules,
+  jiraClient, lookupByKey, lookupByCase, uploadRules, commentRules, reopenRules,
 } from '../lib/jira.js';
 
 export default async function handler(req, res) {
@@ -61,7 +61,7 @@ export default async function handler(req, res) {
     const results = q.type === 'key' ? await lookupByKey(client, q.value) : await lookupByCase(client, q.value);
     await log({ queryType: q.type, result: results.length ? 'found' : 'not_found', keys: results.map((r) => r.key) });
     if (!results.length) return res.status(404).json({ error: 'Not found.', queryType: q.type, query: q.value });
-    return res.status(200).json({ queryType: q.type, query: q.value, results, uploads: uploadRules(), comments: commentRules() });
+    return res.status(200).json({ queryType: q.type, query: q.value, results, uploads: uploadRules(), comments: commentRules(), reopen: reopenRules() });
   } catch (err) {
     console.error('lookup failed', err);
     await log({ queryType: q.type, result: 'error' });
