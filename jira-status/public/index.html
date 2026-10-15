@@ -113,7 +113,7 @@
     const cases = r.salesforceCases.map((c) => c.url
       ? `<a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.number)}</a>` : esc(c.number)).join(', ') || '—';
     const description = r.description
-      ? `<details><summary>Description</summary><div class="c"><div class="b">${linkify(r.description)}</div></div></details>` : '';
+      ? `<details style="margin-top:6px"><summary>Description</summary><div class="c"><div class="b">${linkify(r.description)}</div></div></details>` : '';
     const comments = r.comments.length
       ? `<details><summary>${r.comments.length} comment${r.comments.length === 1 ? '' : 's'}</summary>` +
         r.comments.map((c) => `<div class="c"><div class="m">${esc(c.author)} · ${esc(when(c.created))}</div><div class="b">${linkify(c.body)}</div></div>`).join('') +
@@ -123,6 +123,7 @@
       <h2><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.key)}</a>
         <span class="status s-${esc(r.statusCategory || 'new')}">${esc(r.status)}</span></h2>
       <div>${esc(r.summary)}</div>
+      ${description}
       <dl>
         <dt>Type / priority</dt><dd>${esc(r.type)} · ${esc(r.priority)}</dd>
         <dt>Resolution</dt><dd>${esc(r.resolution || '—')}</dd>
@@ -132,7 +133,6 @@
         <dt>Created</dt><dd>${esc(when(r.created))}</dd>
         <dt>Last updated</dt><dd>${esc(when(r.updated))}</dd>
       </dl>
-      ${description}
       ${comments}
       ${commentSection(r)}
       ${uploadSection(r)}
