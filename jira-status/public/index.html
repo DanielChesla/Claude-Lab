@@ -40,6 +40,11 @@
   .upmsg { flex-basis:100%; font-size:13px; margin-top:4px }
   .upmsg.ok { color:var(--done) } .upmsg.err { color:var(--err) }
   .hint { font-size:12px; color:var(--muted); flex-basis:100% }
+  .cmf { display:grid; gap:8px; margin-top:8px }
+  .cmf textarea { font:inherit; padding:8px 10px; border:1px solid #cbd5e1; border-radius:7px; width:100%; min-height:90px; resize:vertical }
+  .cmf .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap }
+  .cmf .count { font-size:12px; color:var(--muted) }
+  .cmmsg { font-size:13px } .cmmsg.ok { color:var(--done) } .cmmsg.err { color:var(--err) }
   footer { max-width:860px; margin:24px auto 0; padding:0 16px; color:var(--muted); font-size:12px }
   @media (max-width:640px) { form { grid-template-columns:1fr } button { width:100% } dl { grid-template-columns:1fr } }
 </style>
@@ -76,7 +81,18 @@
   const linkify = (t) => esc(t).replace(/\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
 
   let uploadRules = null;   // set from each lookup response
+  let commentRules = null;
   let lastQuery = '';
+
+  function commentSection(r) {
+    if (!commentRules || !commentRules.enabled) return '';
+    return `<details><summary>Add comment</summary>
+      <form class="cmf" data-key="${esc(r.key)}">
+        <textarea name="text" maxlength="${commentRules.maxChars}" placeholder="Plain text. Your email is shown as the author at the top of the comment." required></textarea>
+        <div class="row"><button type="submit">Post comment</button><span class="count">0 / ${commentRules.maxChars}</span></div>
+        <div class="cmmsg"></div>
+      </form></details>`;
+  }
 
   function uploadSection(r) {
     if (!uploadRules || !uploadRules.enabled) return '';
@@ -115,6 +131,7 @@
         <dt>Last updated</dt><dd>${esc(when(r.updated))}</dd>
       </dl>
       ${comments}
+      ${commentSection(r)}
       ${uploadSection(r)}
     </div>`;
   }
@@ -126,6 +143,7 @@
       const data = await r.json().catch(() => ({}));
       if (!r.ok) { out.innerHTML = `<div class="msg err">${esc(data.error || ('Error ' + r.status))}</div>`; return; }
       uploadRules = data.uploads || null;
+      commentRules = data.comments || null;
       lastQuery = query;
       const head = data.queryType === 'case'
         ? `<div class="msg">${data.results.length} ticket${data.results.length === 1 ? '' : 's'} linked to Salesforce case ${esc(data.query)}</div>` : '';
@@ -143,9 +161,35 @@
     try { await runLookup(email, query, false); } finally { go.disabled = false; }
   });
 
+  // Live character count for comment boxes.
+  out.addEventListener('input', (e) => {
+    if (e.target.tagName !== 'TEXTAREA') return;
+    const c = e.target.closest('.cmf')?.querySelector('.count');
+    if (c && commentRules) c.textContent = `${e.target.value.length} / ${commentRules.maxChars}`;
+  });
+
+  // Comments (forms are created inside result cards).
+  async function submitComment(f) {
+    const msg = f.querySelector('.cmmsg'), btn = f.querySelector('button'), ta = f.querySelector('textarea');
+    const text = ta.value.trim(), email = emailEl.value.trim();
+    if (!text) { msg.className = 'cmmsg err'; msg.textContent = 'Enter a comment.'; return; }
+    btn.disabled = true; msg.className = 'cmmsg'; msg.textContent = 'Posting…';
+    try {
+      const r = await fetch('/api/comment', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email, key: f.dataset.key, text }) });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) { msg.className = 'cmmsg err'; msg.textContent = data.error || ('Error ' + r.status); return; }
+      msg.className = 'cmmsg ok'; msg.textContent = `Comment posted to ${data.key}.`;
+      ta.value = '';
+      setTimeout(() => runLookup(email, lastQuery, true), 1200);
+    } catch (err) {
+      msg.className = 'cmmsg err'; msg.textContent = 'Network error. Try again.';
+    } finally { btn.disabled = false; }
+  }
+
   // Attachment uploads (forms are created inside result cards).
   out.addEventListener('submit', async (e) => {
     const f = e.target;
+    if (f.classList.contains('cmf')) { e.preventDefault(); return submitComment(f); }
     if (!f.classList.contains('upf')) return;
     e.preventDefault();
     const msg = f.querySelector('.upmsg'), btn = f.querySelector('button'), input = f.querySelector('input[type=file]');

@@ -12,12 +12,14 @@ Jira Cloud REST API with a dedicated integration account.
 public/index.html          the page
 api/lookup.js              POST /api/lookup — validates, rate-limits, queries Jira, logs
 api/attach.js              POST /api/attach — uploads files to a ticket + attribution comment
+api/comment.js             POST /api/comment — adds a plain-text comment with an author header
 lib/jira.js                shared config loading, Postgres log/limits, Jira client, formatting
 config/allowed-domains.json  email domains allowed to use the page
 config/projects.json         Jira project keys that can be looked up
 config/settings.json         Jira base URL, field IDs, rate limit
 config/uploads.json          upload size cap, file count, allowed extensions, per-email hourly limit
-db/schema.sql              lookups + uploads tables (created automatically on first run)
+config/comments.json         comment length cap, per-email hourly limit, author header text
+db/schema.sql              lookups, uploads and comments tables (created automatically on first run)
 ```
 
 ## How it works
@@ -51,6 +53,16 @@ more `file` parts to `/api/attach`, which:
 7. Logs one `uploads` row per file and one `lookups` row (query_type `upload`) per request.
 
 Set `"enabled": false` in `config/uploads.json` to hide the upload section and refuse uploads.
+
+### Comments
+
+Each result card also has an **Add comment** box. The browser posts `email`, `key` and `text` to
+`/api/comment`, which applies the same domain, IP, project and ticket-existence checks, enforces
+`config/comments.json` (2,000 characters, 20 posted comments per rolling hour per email), and
+posts the comment via `POST /rest/api/3/issue/{key}/comment`. The first line of the comment is a
+bold header from `headerTemplate` ("Comment from someone@profitsolv.com via the Jira status
+page"), followed by the user's text as plain paragraphs. Every attempt is logged to the
+`comments` table. Set `"enabled": false` to hide the box and refuse comments.
 
 ## One-time setup
 
@@ -120,6 +132,7 @@ Edit the JSON files and redeploy (push to the connected branch):
 - Add or remove a project → `config/projects.json` (the integration user also needs Browse on it)
 - Change the Salesforce field, sprint field, rate limit, or max results per case → `config/settings.json`
 - Change upload size, file count, allowed extensions, hourly limit, or the attribution comment → `config/uploads.json`
+- Change comment length, hourly limit, or the author header → `config/comments.json`
 
 ## Local development
 

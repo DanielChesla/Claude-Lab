@@ -10,6 +10,7 @@ export const allowedDomains = require('../config/allowed-domains.json').map((d) 
 export const allowedProjects = require('../config/projects.json').map((p) => String(p).trim().toUpperCase());
 export const settings = require('../config/settings.json');
 export const uploads = require('../config/uploads.json');
+export const comments = require('../config/comments.json');
 
 // jiraBaseUrl is the site (used for "Open in Jira" links). jiraApiBaseUrl is where REST calls go:
 // Atlassian service-account tokens only work through https://api.atlassian.com/ex/jira/<cloudId>,
@@ -57,7 +58,37 @@ export async function ensureSchema() {
     result text NOT NULL
   )`;
   await sql`CREATE INDEX IF NOT EXISTS uploads_email_created_idx ON uploads (email, created_at DESC)`;
+  await sql`CREATE TABLE IF NOT EXISTS comments (
+    id bigserial PRIMARY KEY,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    ip text NOT NULL,
+    email text NOT NULL,
+    issue_key text NOT NULL,
+    chars int NOT NULL,
+    comment_id text,
+    result text NOT NULL
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS comments_email_created_idx ON comments (email, created_at DESC)`;
   schemaReady = true;
+}
+
+export async function commentsThisHour(email) {
+  if (!sql) return 0;
+  await ensureSchema();
+  const rows = await sql`SELECT count(*)::int AS n FROM comments
+                         WHERE email = ${email} AND result = 'posted' AND created_at > now() - interval '1 hour'`;
+  return rows[0]?.n ?? 0;
+}
+
+export async function logComment(row) {
+  if (!sql) { console.log('comment', JSON.stringify(row)); return; }
+  try {
+    await ensureSchema();
+    await sql`INSERT INTO comments (ip, email, issue_key, chars, comment_id, result)
+              VALUES (${row.ip}, ${row.email}, ${row.issueKey}, ${row.chars}, ${row.commentId || null}, ${row.result})`;
+  } catch (err) {
+    console.error('comment log write failed', err);
+  }
 }
 
 // Per-IP limit across all requests (lookups and uploads both write to lookups).
@@ -232,6 +263,21 @@ export function textToAdf(text) {
   return { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: String(text) }] }] };
 }
 
+// Bold header line, then the user's text as paragraphs (blank-line separated, line breaks kept).
+export function commentAdf(header, text) {
+  const paragraphs = String(text).replace(/\r\n?/g, '\n').split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  const content = [{ type: 'paragraph', content: [{ type: 'text', text: String(header), marks: [{ type: 'strong' }] }] }];
+  for (const p of paragraphs) {
+    const nodes = [];
+    p.split('\n').forEach((line, i) => {
+      if (i) nodes.push({ type: 'hardBreak' });
+      if (line) nodes.push({ type: 'text', text: line });
+    });
+    content.push({ type: 'paragraph', content: nodes });
+  }
+  return { type: 'doc', version: 1, content };
+}
+
 // Salesforce field looks like: "00702781 [view ](https://profitsolv1.my.salesforce.com/500RM...) "
 // or, on some projects, an ADF paragraph containing just the number.
 export function parseCases(value) {
@@ -270,12 +316,19 @@ export function formatIssue(issue) {
   };
 }
 
-// What the page needs to know about upload rules (no secrets).
+// What the page needs to know about upload and comment rules (no secrets).
 export function uploadRules() {
   return {
     enabled: uploads.enabled !== false && !!process.env.JIRA_API_TOKEN,
     maxFileBytes: Number(uploads.maxFileBytes),
     maxFilesPerRequest: Number(uploads.maxFilesPerRequest),
     allowedExtensions: uploads.allowedExtensions,
+  };
+}
+
+export function commentRules() {
+  return {
+    enabled: comments.enabled !== false && !!process.env.JIRA_API_TOKEN,
+    maxChars: Number(comments.maxChars),
   };
 }

@@ -30,6 +30,20 @@ CREATE TABLE IF NOT EXISTS uploads (
 
 CREATE INDEX IF NOT EXISTS uploads_email_created_idx ON uploads (email, created_at DESC);
 
+-- One row per comment attempt via /api/comment; drives the per-email hourly comment limit.
+CREATE TABLE IF NOT EXISTS comments (
+  id          bigserial PRIMARY KEY,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  ip          text NOT NULL,
+  email       text NOT NULL,
+  issue_key   text NOT NULL,
+  chars       int NOT NULL,
+  comment_id  text,                  -- Jira comment id when result = 'posted'
+  result      text NOT NULL          -- 'posted' | 'error'
+);
+
+CREATE INDEX IF NOT EXISTS comments_email_created_idx ON comments (email, created_at DESC);
+
 -- Handy queries
 -- Lookups per day:        SELECT date_trunc('day', created_at) d, count(*) FROM lookups GROUP BY d ORDER BY d DESC;
 -- Top users this month:   SELECT email, count(*) FROM lookups WHERE created_at > date_trunc('month', now()) GROUP BY email ORDER BY 2 DESC;
