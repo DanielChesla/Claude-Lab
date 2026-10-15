@@ -47,6 +47,8 @@
   .cmmsg { font-size:13px } .cmmsg.ok { color:var(--done) } .cmmsg.err { color:var(--err) }
   .ro { margin-top:10px }
   .ro .btn2 { background:#fff; color:var(--accent); border:1px solid var(--accent) }
+  .ro .ro-toggle { background:#f59e0b; color:#1f2937; border:1px solid #d97706; font-weight:700; box-shadow:0 2px 6px rgba(245,158,11,.35) }
+  .ro .ro-toggle:hover { background:#fbbf24 }
   .ro form { display:none; gap:8px; margin-top:8px }
   .ro.open form { display:grid }
   .ro textarea { font:inherit; padding:8px 10px; border:1px solid #cbd5e1; border-radius:7px; width:100%; min-height:70px; resize:vertical }
@@ -97,7 +99,7 @@
     if (!closed) return '';
     if (r.labels.includes(reopenRules.label)) return `<div class="ro"><span class="pending">Reopen request pending</span></div>`;
     return `<div class="ro" data-key="${esc(r.key)}">
-      <button type="button" class="btn2 ro-toggle">Request ticket be reopened</button>
+      <button type="button" class="btn2 ro-toggle">Problem still not resolved? Request ticket to be reopened</button>
       <form class="rof" data-key="${esc(r.key)}">
         <textarea name="reason" maxlength="${reopenRules.maxChars}" placeholder="Why should this ticket be reopened? The assignee will be emailed with the ticket number, your email, and this reason." required></textarea>
         <div class="row"><button type="submit">Send reopen request</button><button type="button" class="btn2 ro-cancel">Cancel</button></div>
