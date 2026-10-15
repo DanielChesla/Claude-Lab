@@ -175,6 +175,52 @@ instead and rate limiting is disabled.
    - `DATABASE_URL` — set automatically by the Postgres integration
 3. Deploy. The page is at `/`, the API at `/api/lookup`.
 
+## Microsoft sign-in (optional)
+
+By default the page gates on a typed company email. Setting two environment variables switches it
+to real Microsoft Entra ID sign-in:
+
+- `ENTRA_TENANT_ID` — the Legal Brands tenant, `0e1c4cb5-74f3-4ce0-b40e-801d3d150eb9`
+  (profitsolv.com, mangopractice.com and lawruler.com all live in it).
+- `ENTRA_CLIENT_ID` — the Application (client) ID of the App Registration below.
+
+With both set, `/api/auth-config` reports sign-in as on; the page hides the email box, loads MSAL
+from jsDelivr, signs the user in silently (on a managed Windows device the browser already holds the
+work account, so there is normally no prompt) or redirects to the Microsoft login, and sends the ID
+token as `Authorization: Bearer …` on every API call. `lib/auth.js` verifies the token's signature
+against the tenant's published keys, its issuer, audience and expiry, and takes the caller's email
+from the token. The email-domain allow-list still applies afterwards as a second check. Remove the
+two variables and redeploy to fall back to the typed-email gate.
+
+### App Registration (IT)
+
+In the Entra admin center, **App registrations → New registration**:
+
+1. Name: `Jira Ticket Status Page`.
+2. Supported account types: **Accounts in this organizational directory only** (single tenant).
+3. Authentication → Add a platform → **Single-page application**. Redirect URIs:
+   `https://jira-status-seven.vercel.app/` and `http://localhost:3000/` (local dev). Leave both
+   implicit-grant boxes unchecked; the page uses PKCE.
+4. Certificates & secrets: none. The browser signs in directly; no client secret exists anywhere.
+5. API permissions: Microsoft Graph → Delegated → `openid`, `profile`, `email`, `User.Read`
+   (the defaults). **Grant admin consent** so users never see a consent prompt.
+6. Token configuration → Add optional claim → ID → `email`.
+7. Optional: in **Enterprise applications** open the same app and set *Assignment required* to Yes,
+   then assign the support group. Otherwise anyone in the tenant can sign in (the domain allow-list
+   still applies).
+
+Copy the Application (client) ID into `ENTRA_CLIENT_ID` in Vercel (Production, and Preview if you
+want preview deployments to use it) and redeploy.
+
+Notes:
+
+- Preview deployments have changing URLs, so sign-in only works on URLs listed as redirect URIs.
+  Either leave the two variables out of the Preview environment, or add a stable preview alias as
+  a redirect URI.
+- The ID token lives in the browser's sessionStorage for the tab; closing the tab signs out.
+- `ENTRA_ISSUER` and `ENTRA_JWKS_URL` exist only so the verifier can be tested against a local
+  issuer. Leave them unset.
+
 ## Changing config
 
 Edit the JSON files and redeploy (push to the connected branch):
@@ -200,10 +246,9 @@ npx vercel dev               # http://localhost:3000
 ## Security notes
 
 - The API token never reaches the browser; only the serverless function holds it.
-- The typed email is a domain gate, not authentication. Anyone with the URL and a company-looking
-  address can look up tickets in the allowed projects. If that is not acceptable, enable Vercel
-  Deployment Protection (password or Vercel Authentication) on the project, or swap the email
-  gate for Microsoft 365 sign-in later.
+- Without Microsoft sign-in, the typed email is a domain gate, not authentication: anyone with the
+  URL and a company-looking address can use the page. Set `ENTRA_TENANT_ID` and `ENTRA_CLIENT_ID`
+  (see "Microsoft sign-in") to require a verified work account.
 - Not-found responses are deliberately generic so the page does not reveal which other projects
   exist or which keys are restricted.
 - Jira Cloud treats a bad or expired API token as an anonymous caller and answers 404 rather than

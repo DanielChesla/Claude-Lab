@@ -20,6 +20,9 @@
   input { font:inherit; padding:9px 10px; border:1px solid #cbd5e1; border-radius:7px; width:100% }
   button { font:inherit; font-weight:600; padding:9px 16px; border:0; border-radius:7px; background:var(--accent); color:#fff; cursor:pointer; align-self:end }
   button[disabled] { opacity:.6; cursor:default }
+  [hidden] { display:none !important }
+  form.sso { grid-template-columns:1fr auto }
+  #who a { color:#fff; margin-left:8px }
   .msg { margin:14px 0; padding:10px 12px; border-radius:8px; background:#fff; border:1px solid var(--line) }
   .msg.err { border-color:#fecaca; background:#fef2f2; color:var(--err) }
   .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-top:12px }
@@ -61,11 +64,12 @@
 <header><div class="in">
   <h1>Jira Ticket Status</h1>
   <p>Enter a Jira key (NXT-12345) or a Salesforce case number.</p>
+  <p id="who" hidden></p>
 </div></header>
 
 <main>
   <form id="f" autocomplete="on">
-    <label>Your email
+    <label id="emailWrap">Your email
       <input id="email" type="email" required placeholder="you@profitsolv.com" autocomplete="email">
     </label>
     <label>Jira key or Salesforce case #
@@ -81,12 +85,63 @@
 (function () {
   const $ = (id) => document.getElementById(id);
   const form = $('f'), emailEl = $('email'), qEl = $('q'), go = $('go'), out = $('out');
+  const emailWrap = $('emailWrap'), who = $('who');
   try { emailEl.value = localStorage.getItem('jira-status-email') || ''; } catch {}
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const when = (iso) => iso ? new Date(iso).toLocaleString(undefined, { dateStyle:'medium', timeStyle:'short' }) : '';
   // Render [text](https://...) links from plain text; everything else is escaped.
   const linkify = (t) => esc(t).replace(/\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+  // ---- Microsoft sign-in (only when /api/auth-config says it is on; otherwise the email box is used) ----
+  const MSAL_SRC = 'https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.1/lib/msal-browser.min.js';
+  const SCOPES = ['openid', 'profile', 'email'];
+  let sso = null; // { pca, account } once signed in
+
+  const loadScript = (src) => new Promise((ok, fail) => {
+    const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => fail(new Error('Could not load ' + src)); document.head.appendChild(s);
+  });
+
+  async function initAuth() {
+    let cfg = { enabled: false };
+    try { cfg = await (await fetch('/api/auth-config', { cache: 'no-store' })).json(); } catch {}
+    if (!cfg.enabled) return;
+    emailWrap.hidden = true; emailEl.required = false; emailEl.value = ''; form.classList.add('sso');
+    who.hidden = false; who.textContent = 'Signing in…';
+    await loadScript(MSAL_SRC);
+    const pca = new msal.PublicClientApplication({
+      auth: { clientId: cfg.clientId, authority: cfg.authority, redirectUri: location.origin + '/', navigateToLoginRequestUrl: false },
+      cache: { cacheLocation: 'sessionStorage' },
+    });
+    await pca.initialize();
+    let account = null;
+    try {
+      const r = await pca.handleRedirectPromise();
+      account = (r && r.account) || pca.getActiveAccount() || pca.getAllAccounts()[0] || null;
+    } catch (err) { console.warn('sign-in redirect failed', err); }
+    if (!account) {
+      try { account = (await pca.ssoSilent({ scopes: SCOPES })).account; }        // silent on managed devices
+      catch { await pca.loginRedirect({ scopes: SCOPES }); await new Promise(() => {}); } // otherwise go to Microsoft
+    }
+    pca.setActiveAccount(account);
+    sso = { pca, account };
+    who.innerHTML = `Signed in as ${esc(account.username)} <a href="#" id="signout">Sign out</a>`;
+    $('signout').addEventListener('click', (e) => { e.preventDefault(); pca.logoutRedirect({ account }); });
+  }
+
+  // Authorization header for API calls; {} when sign-in is off. Refreshes the ID token near expiry.
+  async function authHeaders() {
+    if (!sso) return {};
+    const req = { scopes: SCOPES, account: sso.account };
+    try {
+      let r = await sso.pca.acquireTokenSilent(req);
+      const exp = r.idTokenClaims && r.idTokenClaims.exp;
+      if (exp && exp * 1000 < Date.now() + 2 * 60 * 1000) r = await sso.pca.acquireTokenSilent({ ...req, forceRefresh: true });
+      return { Authorization: 'Bearer ' + r.idToken };
+    } catch {
+      await sso.pca.loginRedirect(req); await new Promise(() => {});
+    }
+  }
 
   let uploadRules = null;   // set from each lookup response
   let commentRules = null;
@@ -166,7 +221,7 @@
   async function runLookup(email, query, quiet) {
     if (!quiet) out.innerHTML = '<div class="msg">Looking up…</div>';
     try {
-      const r = await fetch('/api/lookup', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email, query }) });
+      const r = await fetch('/api/lookup', { method:'POST', headers:{ 'Content-Type':'application/json', ...(await authHeaders()) }, body: JSON.stringify({ email, query }) });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) { out.innerHTML = `<div class="msg err">${esc(data.error || ('Error ' + r.status))}</div>`; return; }
       uploadRules = data.uploads || null;
@@ -184,7 +239,7 @@
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = emailEl.value.trim(), query = qEl.value.trim();
-    try { localStorage.setItem('jira-status-email', email); } catch {}
+    if (!sso) try { localStorage.setItem('jira-status-email', email); } catch {}
     go.disabled = true;
     try { await runLookup(email, query, false); } finally { go.disabled = false; }
   });
@@ -203,7 +258,7 @@
     if (!text) { msg.className = 'cmmsg err'; msg.textContent = 'Enter a comment.'; return; }
     btn.disabled = true; msg.className = 'cmmsg'; msg.textContent = 'Posting…';
     try {
-      const r = await fetch('/api/comment', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email, key: f.dataset.key, text }) });
+      const r = await fetch('/api/comment', { method:'POST', headers:{ 'Content-Type':'application/json', ...(await authHeaders()) }, body: JSON.stringify({ email, key: f.dataset.key, text }) });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) { msg.className = 'cmmsg err'; msg.textContent = data.error || ('Error ' + r.status); return; }
       msg.className = 'cmmsg ok'; msg.textContent = `Comment posted to ${data.key}.`;
@@ -226,7 +281,7 @@
     if (!reason) { msg.className = 'cmmsg err'; msg.textContent = 'Enter a reason.'; return; }
     btn.disabled = true; msg.className = 'cmmsg'; msg.textContent = 'Sending…';
     try {
-      const r = await fetch('/api/reopen', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email, key: f.dataset.key, reason }) });
+      const r = await fetch('/api/reopen', { method:'POST', headers:{ 'Content-Type':'application/json', ...(await authHeaders()) }, body: JSON.stringify({ email, key: f.dataset.key, reason }) });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) { msg.className = 'cmmsg err'; msg.textContent = data.error || ('Error ' + r.status); return; }
       msg.className = 'cmmsg ok'; msg.textContent = `Reopen request sent for ${data.key}.`;
@@ -255,7 +310,7 @@
     for (const x of files) fd.append('file', x, x.name);
     btn.disabled = true; msg.className = 'upmsg'; msg.textContent = 'Uploading…';
     try {
-      const r = await fetch('/api/attach', { method:'POST', body: fd });
+      const r = await fetch('/api/attach', { method:'POST', headers: await authHeaders(), body: fd });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) { msg.className = 'upmsg err'; msg.textContent = data.error || ('Error ' + r.status); return; }
       msg.className = 'upmsg ok';
@@ -267,6 +322,8 @@
       msg.className = 'upmsg err'; msg.textContent = 'Network error. Try again.';
     } finally { btn.disabled = false; }
   });
+  go.disabled = true;
+  initAuth().catch((err) => { who.hidden = false; who.textContent = 'Sign-in failed: ' + err.message; }).finally(() => { go.disabled = false; });
 })();
 </script>
 </body>

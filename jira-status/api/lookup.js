@@ -11,6 +11,7 @@ import {
   clientIp, isAllowedEmail, classify, isRateLimited, writeLog,
   jiraClient, lookupByKey, lookupByCase, uploadRules, commentRules, reopenRules,
 } from '../lib/jira.js';
+import { callerEmail } from '../lib/auth.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -21,7 +22,9 @@ export default async function handler(req, res) {
 
   let body = req.body;
   if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
-  const email = String(body?.email || '').trim().toLowerCase().slice(0, 254);
+  const who = await callerEmail((h) => req.headers?.[h], body?.email); // verified token when Microsoft sign-in is on
+  if (who.error) return res.status(who.status).json({ error: who.error });
+  const email = who.email;
   const rawQuery = String(body?.query || '').trim().slice(0, 64);
   const ip = clientIp((h) => req.headers?.[h], req.socket?.remoteAddress);
   const log = (entry) => writeLog({ ip, email, query: rawQuery, ...entry });

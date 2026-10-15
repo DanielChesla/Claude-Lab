@@ -16,6 +16,7 @@ import {
   isRateLimited, reopensThisHour, writeLog, logReopen,
   jiraClient, lookupByKey, commentAdf,
 } from '../lib/jira.js';
+import { callerEmail } from '../lib/auth.js';
 
 const MAX_CHARS = Number(R.maxChars);
 const PER_HOUR = Number(R.perEmailPerHour);
@@ -31,7 +32,9 @@ export default async function handler(req, res) {
 
   let body = req.body;
   if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
-  const email = String(body?.email || '').trim().toLowerCase().slice(0, 254);
+  const who = await callerEmail((h) => req.headers?.[h], body?.email); // verified token when Microsoft sign-in is on
+  if (who.error) return res.status(who.status).json({ error: who.error });
+  const email = who.email;
   const key = String(body?.key || '').trim().toUpperCase().slice(0, 32);
   const reason = String(body?.reason || '').replace(/\r\n?/g, '\n').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').trim();
   const ip = clientIp((h) => req.headers?.[h], req.socket?.remoteAddress);

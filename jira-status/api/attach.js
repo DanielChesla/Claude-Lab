@@ -15,6 +15,7 @@ import {
   isRateLimited, uploadsThisHour, writeLog, logUpload,
   jiraClient, lookupByKey, textToAdf,
 } from '../lib/jira.js';
+import { callerEmail } from '../lib/auth.js';
 
 const json = (status, body) => new Response(JSON.stringify(body), {
   status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
@@ -42,7 +43,9 @@ export async function POST(request) {
   let form;
   try { form = await request.formData(); } catch { return json(400, { error: 'Expected multipart form data.' }); }
 
-  const email = String(form.get('email') || '').trim().toLowerCase().slice(0, 254);
+  const who = await callerEmail((h) => request.headers.get(h), form.get('email')); // verified token when Microsoft sign-in is on
+  if (who.error) return json(who.status, { error: who.error });
+  const email = who.email;
   const key = String(form.get('key') || '').trim().toUpperCase().slice(0, 32);
   const files = form.getAll('file').filter((f) => f && typeof f === 'object' && typeof f.arrayBuffer === 'function');
   const log = (entry) => writeLog({ ip, email, query: key, queryType: 'upload', ...entry });
