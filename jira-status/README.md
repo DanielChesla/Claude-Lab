@@ -1,5 +1,8 @@
 # Jira Ticket Status
 
+**Live:** https://jira-status-seven.vercel.app — Vercel project `jira-status`, deployed
+automatically from `master` of `DanielChesla/Claude-Lab` with Root Directory `jira-status`.
+
 Read-only web page for ProfitSolv staff to check the status of a Jira ticket by key
 (`NXT-12345`) or by Salesforce case number (`00702781`), without needing a Jira license
 themselves. Runs on Vercel: a static page plus one Node serverless function that calls the
