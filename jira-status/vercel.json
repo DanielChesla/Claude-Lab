@@ -1,6 +1,6 @@
 {
   "functions": {
-    "api/lookup.js": {
+    "api/*.js": {
       "includeFiles": "config/**"
     }
   }
