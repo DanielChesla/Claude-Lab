@@ -34,8 +34,8 @@ db/schema.sql              lookups, uploads and comments tables (created automat
 5. Every request is written to the `lookups` table (timestamp, IP, email, query, result, matched keys).
 
 Shown per ticket: status (with Jira category colour), summary, type, priority, resolution,
-fix versions, sprint, linked Salesforce case(s), created/updated, and all comments (newest first,
-collapsed). Each key links to Jira for licensed users.
+fix versions, sprint, linked Salesforce case(s), created/updated, the description (collapsed),
+and all comments (newest first, collapsed). Each key links to Jira for licensed users.
 
 ### Attachments
 

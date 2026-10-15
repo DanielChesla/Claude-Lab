@@ -23,7 +23,7 @@ export const RATE_LIMIT = Number(settings.rateLimitPerMinute ?? 30);
 export const MAX_CASE_MATCHES = Number(settings.maxCaseMatches ?? 20);
 
 export const FIELDS = [
-  'summary', 'status', 'issuetype', 'priority', 'created', 'updated',
+  'summary', 'description', 'status', 'issuetype', 'priority', 'created', 'updated',
   'fixVersions', 'resolution', 'comment', SPRINT_FIELD, SF_FIELD,
 ];
 
@@ -302,6 +302,7 @@ export function formatIssue(issue) {
     key: issue.key,
     url: `${JIRA_BASE}/browse/${issue.key}`,
     summary: f.summary || '',
+    description: adfToText(f.description).trim(),
     status: f.status?.name || '',
     statusCategory: f.status?.statusCategory?.key || '',   // new | indeterminate | done
     type: f.issuetype?.name || '',
