@@ -65,7 +65,7 @@ export async function POST(request) {
 
   if (!isAllowedEmail(email)) {
     await log({ result: 'rejected_domain' });
-    return json(403, { error: 'Please use a company email address.' });
+    return json(403, { error: 'Access Denied' });
   }
 
   if (!/^[A-Z][A-Z0-9_]*-\d+$/.test(key) || !allowedProjects.includes(projectOf(key))) {

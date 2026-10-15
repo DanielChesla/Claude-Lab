@@ -50,7 +50,7 @@ export default async function handler(req, res) {
 
   if (!isAllowedEmail(email)) {
     await log({ result: 'rejected_domain' });
-    return res.status(403).json({ error: 'Please use a company email address.' });
+    return res.status(403).json({ error: 'Access Denied' });
   }
   if (!/^[A-Z][A-Z0-9_]*-\d+$/.test(key) || !allowedProjects.includes(projectOf(key))) {
     await log({ result: 'not_found' });
