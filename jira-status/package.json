@@ -1,0 +1,17 @@
+{
+  "name": "jira-status",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Read-only Jira ticket status lookup for ProfitSolv staff (Vercel).",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "vercel dev",
+    "check": "node --check api/lookup.js"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.4"
+  }
+}

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jira Ticket Status</title>
+<meta name="robots" content="noindex">
+<style>
+  :root { --navy:#1b2a4a; --accent:#1d4ed8; --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --bg:#f6f7f9; --card:#fff;
+          --new:#64748b; --prog:#b7791f; --done:#15803d; --err:#b91c1c; }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif }
+  header { background:var(--navy); color:#fff; padding:18px 16px }
+  header .in { max-width:860px; margin:0 auto }
+  header h1 { margin:0; font-size:20px }
+  header p { margin:4px 0 0; color:#cbd5e1; font-size:13px }
+  main { max-width:860px; margin:0 auto; padding:20px 16px 48px }
+  form { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; display:grid; gap:12px; grid-template-columns:1fr 1fr auto }
+  label { display:grid; gap:4px; font-size:13px; color:var(--muted) }
+  input { font:inherit; padding:9px 10px; border:1px solid #cbd5e1; border-radius:7px; width:100% }
+  button { font:inherit; font-weight:600; padding:9px 16px; border:0; border-radius:7px; background:var(--accent); color:#fff; cursor:pointer; align-self:end }
+  button[disabled] { opacity:.6; cursor:default }
+  .msg { margin:14px 0; padding:10px 12px; border-radius:8px; background:#fff; border:1px solid var(--line) }
+  .msg.err { border-color:#fecaca; background:#fef2f2; color:var(--err) }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-top:12px }
+  .card h2 { margin:0; font-size:16px }
+  .card h2 a { color:var(--accent); text-decoration:none }
+  .card h2 a:hover { text-decoration:underline }
+  .status { display:inline-block; font-size:12px; font-weight:600; padding:2px 8px; border-radius:999px; color:#fff; margin-left:8px; vertical-align:middle }
+  .s-new { background:var(--new) } .s-indeterminate { background:var(--prog) } .s-done { background:var(--done) }
+  dl { display:grid; grid-template-columns:140px 1fr; gap:4px 10px; margin:10px 0 0; font-size:14px }
+  dt { color:var(--muted) } dd { margin:0 }
+  details { margin-top:10px } summary { cursor:pointer; color:var(--accent); font-size:14px }
+  .c { border-top:1px solid var(--line); padding:8px 0 }
+  .c .m { font-size:12px; color:var(--muted) }
+  .c .b { white-space:pre-wrap; word-break:break-word; margin-top:2px }
+  footer { max-width:860px; margin:24px auto 0; padding:0 16px; color:var(--muted); font-size:12px }
+  @media (max-width:640px) { form { grid-template-columns:1fr } button { width:100% } dl { grid-template-columns:1fr } }
+</style>
+</head>
+<body>
+<header><div class="in">
+  <h1>Jira Ticket Status</h1>
+  <p>Read-only lookup. Enter a Jira key (NXT-12345) or a Salesforce case number.</p>
+</div></header>
+
+<main>
+  <form id="f" autocomplete="on">
+    <label>Your email
+      <input id="email" type="email" required placeholder="you@profitsolv.com" autocomplete="email">
+    </label>
+    <label>Jira key or Salesforce case #
+      <input id="q" type="text" required placeholder="NXT-12345 or 00702781" autocomplete="off" spellcheck="false">
+    </label>
+    <button id="go" type="submit">Look up</button>
+  </form>
+  <div id="out"></div>
+</main>
+<footer>Results reflect Jira at the time of lookup. Lookups are logged.</footer>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const form = $('f'), emailEl = $('email'), qEl = $('q'), go = $('go'), out = $('out');
+  try { emailEl.value = localStorage.getItem('jira-status-email') || ''; } catch {}
+
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const when = (iso) => iso ? new Date(iso).toLocaleString(undefined, { dateStyle:'medium', timeStyle:'short' }) : '';
+  // Render [text](https://...) links from plain text; everything else is escaped.
+  const linkify = (t) => esc(t).replace(/\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+  function card(r) {
+    const fix = r.fixVersions.map((v) => esc(v.name) + (v.released ? ' (released)' : '')).join(', ') || '—';
+    const sprints = r.sprints.map((s) => esc(s.name)).join(', ') || '—';
+    const cases = r.salesforceCases.map((c) => c.url
+      ? `<a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.number)}</a>` : esc(c.number)).join(', ') || '—';
+    const comments = r.comments.length
+      ? `<details><summary>${r.comments.length} comment${r.comments.length === 1 ? '' : 's'}</summary>` +
+        r.comments.map((c) => `<div class="c"><div class="m">${esc(c.author)} · ${esc(when(c.created))}</div><div class="b">${linkify(c.body)}</div></div>`).join('') +
+        `</details>`
+      : `<div class="c m" style="color:var(--muted);font-size:13px">No comments</div>`;
+    return `<div class="card">
+      <h2><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.key)}</a>
+        <span class="status s-${esc(r.statusCategory || 'new')}">${esc(r.status)}</span></h2>
+      <div>${esc(r.summary)}</div>
+      <dl>
+        <dt>Type / priority</dt><dd>${esc(r.type)} · ${esc(r.priority)}</dd>
+        <dt>Resolution</dt><dd>${esc(r.resolution || '—')}</dd>
+        <dt>Fix version</dt><dd>${fix}</dd>
+        <dt>Sprint</dt><dd>${sprints}</dd>
+        <dt>Salesforce case</dt><dd>${cases}</dd>
+        <dt>Created</dt><dd>${esc(when(r.created))}</dd>
+        <dt>Last updated</dt><dd>${esc(when(r.updated))}</dd>
+      </dl>
+      ${comments}
+    </div>`;
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = emailEl.value.trim(), query = qEl.value.trim();
+    try { localStorage.setItem('jira-status-email', email); } catch {}
+    go.disabled = true; out.innerHTML = '<div class="msg">Looking up…</div>';
+    try {
+      const r = await fetch('/api/lookup', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email, query }) });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) { out.innerHTML = `<div class="msg err">${esc(data.error || ('Error ' + r.status))}</div>`; return; }
+      const head = data.queryType === 'case'
+        ? `<div class="msg">${data.results.length} ticket${data.results.length === 1 ? '' : 's'} linked to Salesforce case ${esc(data.query)}</div>` : '';
+      out.innerHTML = head + data.results.map(card).join('');
+    } catch (err) {
+      out.innerHTML = `<div class="msg err">Network error. Try again.</div>`;
+    } finally { go.disabled = false; }
+  });
+})();
+</script>
+</body>
+</html>
