@@ -74,7 +74,7 @@ Submitting posts to `/api/reopen`, which, after the usual checks:
 
 1. Re-reads the ticket and refuses (409) if the status is not in the list or the ticket already
    carries the `reopen-requested` label ("already pending").
-2. Enforces 5 requests per rolling hour per email and a 1,000-character reason.
+2. Enforces 20 requests per rolling hour per email and a 1,000-character reason.
 3. Posts a comment whose bold first line is "Reopen requested by someone@profitsolv.com via the
    Jira status page for NXT-12345 (Done) https://profitsolv.atlassian.net/browse/NXT-12345",
    followed by the reason. Key, status and link are in the comment on purpose: the email rule only
