@@ -93,7 +93,10 @@ export default async function handler(req, res) {
     }
 
     // 1) Comment (this is what the Automation rule triggers on, so it carries requestor + reason).
-    const header = String(R.headerTemplate).replace('{email}', email);
+    // Everything the notification email needs is in the comment, so the Automation rule can rely on
+    // {{comment.body}} alone. Placeholders: {email} {key} {status} {url}
+    const header = String(R.headerTemplate)
+      .replace('{email}', email).replace('{key}', key).replace('{status}', issue.status).replace('{url}', issue.url);
     const c = await client.post(`/rest/api/3/issue/${encodeURIComponent(key)}/comment`, { body: commentAdf(header, reason) });
     if (!c.ok) {
       console.error('Jira reopen comment returned', c.status, (await c.text()).slice(0, 300));

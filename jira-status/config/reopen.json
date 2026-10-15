@@ -4,5 +4,5 @@
   "label": "reopen-requested",
   "maxChars": 1000,
   "perEmailPerHour": 5,
-  "headerTemplate": "Reopen requested by {email} via the Jira status page"
+  "headerTemplate": "Reopen requested by {email} via the Jira status page for {key} ({status}) {url}"
 }

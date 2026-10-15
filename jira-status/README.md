@@ -76,7 +76,9 @@ Submitting posts to `/api/reopen`, which, after the usual checks:
    carries the `reopen-requested` label ("already pending").
 2. Enforces 5 requests per rolling hour per email and a 1,000-character reason.
 3. Posts a comment whose bold first line is "Reopen requested by someone@profitsolv.com via the
-   Jira status page", followed by the reason.
+   Jira status page for NXT-12345 (Done) https://profitsolv.atlassian.net/browse/NXT-12345",
+   followed by the reason. Key, status and link are in the comment on purpose: the email rule only
+   needs `{{comment.body}}`.
 4. Adds the `reopen-requested` label (needs Edit Issues on the project).
 5. Logs to `reopen_requests`.
 
@@ -91,21 +93,20 @@ The email to the assignee is sent by a **Jira Automation rule**, not by the page
 - **If / else block:**
   - *If* Assignee is not empty → **Send email**, To: `{{issue.assignee.emailAddress}}`.
   - *Else* → **Send email**, To: `{{issue.reporter.emailAddress}}`.
-- **Email subject:** `Reopen requested: {{issue.key}} {{issue.summary}}`
-- **Email body (smart values):**
+- **Email subject:** `Reopen requested: {{issue.key}} {{issue.summary}}` (if `{{issue.…}}` does not
+  render in your builder, use the fixed subject `Reopen requested on a Jira ticket`).
+- **Email body:** keep it to the one smart value that renders in every builder:
 
   ```
-  A support rep has asked for {{issue.key}} to be reopened.
-
-  Ticket:    {{issue.url}}
-  Status:    {{issue.status.name}}
-  Requested: {{comment.created.format("yyyy-MM-dd HH:mm")}}
+  A support rep has asked for a ticket to be reopened. Details, requestor and reason:
 
   {{comment.body}}
 
-  The first line of the comment names the requestor; the rest is their reason.
   Remove the "reopen-requested" label on the ticket once you have acted on it.
   ```
+
+  The comment's first line already contains the ticket key, its status, a link, and the
+  requestor's email, so nothing else is needed from the issue.
 
 - Scope the rule to the four projects in `config/projects.json`. Actor can stay as Automation for
   Jira.
