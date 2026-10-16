@@ -265,7 +265,8 @@ that name too.
 - Request bodies: API Gateway allows 10 MB and Lambda responses 6 MB, so the 4 MB attachment cap
   still fits (bodies arrive base64-encoded, about a third larger).
 - `vercel.json` is ignored on AWS; `template.yaml` plays that role.
-- Logs: `aws logs tail /aws/lambda/jira-status-api --follow --profile jira-status`.
+- Logs: `aws logs tail /aws/lambda/jira-status-api --follow --profile jira-status`. From Git Bash
+  prefix the command with `MSYS_NO_PATHCONV=1`, or the `/aws/...` name is rewritten as a Windows path.
 - Tear down: `sam delete --profile jira-status` (empty the site bucket first).
 
 ## Changing config
