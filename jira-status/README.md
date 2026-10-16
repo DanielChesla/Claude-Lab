@@ -1,7 +1,8 @@
 # Jira Ticket Status
 
-**Live:** https://jira-status-seven.vercel.app — Vercel project `jira-status`, deployed
-automatically from `master` of `DanielChesla/Claude-Lab` with Root Directory `jira-status`.
+**Live:** https://jira-status.profitsolv.com — company AWS account (SAM stack `jira-status`,
+see "Deploying to AWS" below), source in `profitsolv-team/jira-status`. The original Vercel copy at
+https://jira-status-seven.vercel.app still runs from `DanielChesla/Claude-Lab` until it is retired.
 
 Read-only web page for ProfitSolv staff to check the status of a Jira ticket by key
 (`NXT-12345`) or by Salesforce case number (`00702781`), without needing a Jira license
@@ -196,7 +197,8 @@ In the Entra admin center, **App registrations → New registration**:
 1. Name: `Jira Ticket Status Page`.
 2. Supported account types: **Accounts in this organizational directory only** (single tenant).
 3. Authentication → Add a platform → **Single-page application**. Redirect URIs:
-   `https://jira-status-seven.vercel.app/` and `http://localhost:3000/` (local dev). Leave both
+   `https://jira-status.profitsolv.com/`, `https://jira-status-seven.vercel.app/` (until Vercel is
+   retired) and `http://localhost:3000/` (local dev). Leave both
    implicit-grant boxes unchecked; the page uses PKCE.
 4. Certificates & secrets: none. The browser signs in directly; no client secret exists anywhere.
 5. API permissions: Microsoft Graph → Delegated → `openid`, `profile`, `email`, `User.Read`
