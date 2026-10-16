@@ -13,7 +13,7 @@ Parameters:
     Description: Application (client) id of the "Jira Ticket Status Page" app registration.
   LogRetentionDays:
     Type: Number
-    Default: 90
+    Default: 30
   DomainName:
     Type: String
     Default: ''

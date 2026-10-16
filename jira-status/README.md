@@ -231,7 +231,7 @@ events to the handlers, and `template.yaml` describes the stack:
   from S3. One origin means no CORS and the Entra redirect URI is simply the CloudFront URL.
 - **Secrets Manager** secret `jira-status/jira` with `{"email": ..., "token": ...}`, read once per
   cold start. The Entra ids are plain stack parameters.
-- **CloudWatch Logs** group `/aws/lambda/jira-status-api`, 90-day retention. This is where the
+- **CloudWatch Logs** group `/aws/lambda/jira-status-api`, 30-day retention. This is where the
   JSON request lines go.
 
 Stack name and region live in `samconfig.toml` (`jira-status`, `us-east-1`).
