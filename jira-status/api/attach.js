@@ -3,16 +3,16 @@
 // multipart/form-data fields:  email, key, file (repeatable)
 // Responses: 200 { key, attached: [{id, filename, size}], commentPosted }
 //            400 bad input · 403 email domain not allowed · 404 not found · 413 file too large
-//            429 rate limited · 500 misconfigured · 502 Jira call failed
+//            500 misconfigured · 502 Jira call failed
 //
 // Uses JIRA_API_TOKEN, which needs read + write scopes (the ticket is verified before anything is
 // uploaded). Jira shows the upload as coming from the service account, so a comment naming the
-// real uploader is posted after a successful upload. Limits and the on/off switch live in
-// ../config/uploads.json. Vercel caps request bodies at 4.5 MB regardless.
+// real uploader is posted after a successful upload. Size, count and type limits and the on/off switch
+// live in ../config/uploads.json. Vercel caps request bodies at 4.5 MB regardless.
 
 import {
   uploads as U, clientIp, isAllowedEmail, projectOf, allowedProjects,
-  isRateLimited, uploadsThisHour, writeLog, logUpload,
+  writeLog,
   jiraClient, lookupByKey, textToAdf,
 } from '../lib/jira.js';
 import { callerEmail } from '../lib/auth.js';
@@ -24,7 +24,6 @@ const json = (status, body) => new Response(JSON.stringify(body), {
 const MAX_BYTES = Number(U.maxFileBytes);
 const MAX_FILES = Number(U.maxFilesPerRequest);
 const ALLOWED_EXT = U.allowedExtensions.map((e) => String(e).toLowerCase().replace(/^\./, ''));
-const PER_HOUR = Number(U.perEmailPerHour);
 
 function safeName(name) {
   // Drop any path, control characters, and leading dots; keep it readable and bounded.
@@ -55,15 +54,6 @@ export async function POST(request) {
   if (!client) {
     console.error('JIRA_EMAIL / JIRA_API_TOKEN not set');
     return json(500, { error: 'Uploads are not configured.' });
-  }
-
-  try {
-    if (await isRateLimited(ip)) {
-      await log({ result: 'rate_limited' });
-      return json(429, { error: 'Too many requests. Try again in a minute.' });
-    }
-  } catch (err) {
-    console.error('rate-limit check failed; allowing request', err);
   }
 
   if (!isAllowedEmail(email)) {
@@ -105,12 +95,6 @@ export async function POST(request) {
       return json(404, { error: 'Not found.' });
     }
 
-    const used = await uploadsThisHour(email);
-    if (used + files.length > PER_HOUR) {
-      await log({ result: 'rate_limited' });
-      return json(429, { error: `Upload limit reached (${PER_HOUR} files per hour). Try again later.` });
-    }
-
     const fd = new FormData();
     for (const f of files) {
       fd.append('file', new Blob([await f.arrayBuffer()], { type: f.type || 'application/octet-stream' }), safeName(f.name));
@@ -118,12 +102,10 @@ export async function POST(request) {
     const r = await client.postForm(`/rest/api/3/issue/${encodeURIComponent(key)}/attachments`, fd);
     if (!r.ok) {
       console.error('Jira attachment upload returned', r.status, (await r.text()).slice(0, 300));
-      for (const f of files) await logUpload({ ip, email, issueKey: key, filename: safeName(f.name), sizeBytes: f.size, result: 'error' });
-      await log({ result: 'error', keys: [key] });
+      await log({ result: 'error', keys: [key], files: files.map((f) => ({ name: safeName(f.name), size: f.size })) });
       return json(502, { error: 'Jira rejected the upload. Try again shortly.' });
     }
     const attached = (await r.json()).map((a) => ({ id: String(a.id), filename: a.filename, size: Number(a.size) }));
-    for (const a of attached) await logUpload({ ip, email, issueKey: key, filename: a.filename, sizeBytes: a.size, attachmentId: a.id, result: 'uploaded' });
 
     // Attribution comment; failure here is reported but does not undo the upload.
     let commentPosted = false;
@@ -138,7 +120,7 @@ export async function POST(request) {
       console.error('attribution comment failed', err);
     }
 
-    await log({ result: 'uploaded', keys: [key] });
+    await log({ result: 'uploaded', keys: [key], files: attached });
     return json(200, { key, attached, commentPosted });
   } catch (err) {
     console.error('upload failed', err);

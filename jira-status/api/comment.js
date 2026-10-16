@@ -3,20 +3,19 @@
 // Request body:  { "email": "someone@profitsolv.com", "key": "NXT-12345", "text": "..." }
 // Responses:     200 { key, commentId }
 //                400 bad input · 403 email domain not allowed / comments off · 404 not found
-//                429 rate limited · 500 misconfigured · 502 Jira call failed
+//                500 misconfigured · 502 Jira call failed
 //
 // Jira shows the comment as coming from the service account, so the first line of the comment is a
-// bold header naming the real author. Limits live in ../config/comments.json.
+// bold header naming the real author. The length cap lives in ../config/comments.json.
 
 import {
   comments as C, clientIp, isAllowedEmail, projectOf, allowedProjects,
-  isRateLimited, commentsThisHour, writeLog, logComment,
+  writeLog,
   jiraClient, lookupByKey, commentAdf,
 } from '../lib/jira.js';
 import { callerEmail } from '../lib/auth.js';
 
 const MAX_CHARS = Number(C.maxChars);
-const PER_HOUR = Number(C.perEmailPerHour);
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -40,15 +39,6 @@ export default async function handler(req, res) {
   if (!client) {
     console.error('JIRA_EMAIL / JIRA_API_TOKEN not set');
     return res.status(500).json({ error: 'Server is not configured.' });
-  }
-
-  try {
-    if (await isRateLimited(ip)) {
-      await log({ result: 'rate_limited' });
-      return res.status(429).json({ error: 'Too many requests. Try again in a minute.' });
-    }
-  } catch (err) {
-    console.error('rate-limit check failed; allowing request', err);
   }
 
   if (!isAllowedEmail(email)) {
@@ -78,22 +68,15 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: 'Not found.' });
     }
 
-    if ((await commentsThisHour(email)) >= PER_HOUR) {
-      await log({ result: 'rate_limited' });
-      return res.status(429).json({ error: `Comment limit reached (${PER_HOUR} per hour). Try again later.` });
-    }
-
     const header = String(C.headerTemplate).replace('{email}', email);
     const r = await client.post(`/rest/api/3/issue/${encodeURIComponent(key)}/comment`, { body: commentAdf(header, text) });
     if (!r.ok) {
       console.error('Jira comment returned', r.status, (await r.text()).slice(0, 300));
-      await logComment({ ip, email, issueKey: key, chars: text.length, result: 'error' });
-      await log({ result: 'error', keys: [key] });
+      await log({ result: 'error', keys: [key], chars: text.length });
       return res.status(502).json({ error: 'Jira rejected the comment. Try again shortly.' });
     }
     const created = await r.json();
-    await logComment({ ip, email, issueKey: key, chars: text.length, commentId: String(created.id), result: 'posted' });
-    await log({ result: 'posted', keys: [key] });
+    await log({ result: 'posted', keys: [key], chars: text.length, commentId: String(created.id) });
     return res.status(200).json({ key, commentId: String(created.id) });
   } catch (err) {
     console.error('comment failed', err);

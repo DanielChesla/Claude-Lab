@@ -4,7 +4,7 @@
 // Responses:     200 { key, commentId, labelAdded }
 //                400 bad input · 403 domain not allowed / feature off · 404 not found
 //                409 ticket not in a reopenable status, or a request is already pending
-//                429 rate limited · 500 misconfigured · 502 Jira call failed
+//                500 misconfigured · 502 Jira call failed
 //
 // The ticket's status is never changed here. The function posts a comment whose first line is a
 // bold header naming the requestor, then adds the label from config/reopen.json. A Jira Automation
@@ -13,13 +13,12 @@
 
 import {
   reopen as R, clientIp, isAllowedEmail, projectOf, allowedProjects,
-  isRateLimited, reopensThisHour, writeLog, logReopen,
+  writeLog,
   jiraClient, lookupByKey, commentAdf,
 } from '../lib/jira.js';
 import { callerEmail } from '../lib/auth.js';
 
 const MAX_CHARS = Number(R.maxChars);
-const PER_HOUR = Number(R.perEmailPerHour);
 const STATUSES = R.statuses.map((s) => String(s).toLowerCase());
 const LABEL = String(R.label);
 
@@ -45,15 +44,6 @@ export default async function handler(req, res) {
   if (!client) {
     console.error('JIRA_EMAIL / JIRA_API_TOKEN not set');
     return res.status(500).json({ error: 'Server is not configured.' });
-  }
-
-  try {
-    if (await isRateLimited(ip)) {
-      await log({ result: 'rate_limited' });
-      return res.status(429).json({ error: 'Too many requests. Try again in a minute.' });
-    }
-  } catch (err) {
-    console.error('rate-limit check failed; allowing request', err);
   }
 
   if (!isAllowedEmail(email)) {
@@ -90,10 +80,6 @@ export default async function handler(req, res) {
       await log({ result: 'already_pending', keys: [key] });
       return res.status(409).json({ error: `A reopen request for ${key} is already pending.` });
     }
-    if ((await reopensThisHour(email)) >= PER_HOUR) {
-      await log({ result: 'rate_limited' });
-      return res.status(429).json({ error: `Reopen request limit reached (${PER_HOUR} per hour). Try again later.` });
-    }
 
     // 1) Comment (this is what the Automation rule triggers on, so it carries requestor + reason).
     // Everything the notification email needs is in the comment, so the Automation rule can rely on
@@ -103,8 +89,7 @@ export default async function handler(req, res) {
     const c = await client.post(`/rest/api/3/issue/${encodeURIComponent(key)}/comment`, { body: commentAdf(header, reason) });
     if (!c.ok) {
       console.error('Jira reopen comment returned', c.status, (await c.text()).slice(0, 300));
-      await logReopen({ ip, email, issueKey: key, status: issue.status, chars: reason.length, result: 'error' });
-      await log({ result: 'error', keys: [key] });
+      await log({ result: 'error', keys: [key], status: issue.status, chars: reason.length });
       return res.status(502).json({ error: 'Jira rejected the request. Try again shortly.' });
     }
     const commentId = String((await c.json()).id);
@@ -119,8 +104,7 @@ export default async function handler(req, res) {
       console.error('Jira label add failed', err);
     }
 
-    await logReopen({ ip, email, issueKey: key, status: issue.status, chars: reason.length, commentId, labelAdded, result: 'requested' });
-    await log({ result: 'requested', keys: [key] });
+    await log({ result: 'requested', keys: [key], status: issue.status, chars: reason.length, commentId, labelAdded });
     return res.status(200).json({ key, commentId, labelAdded });
   } catch (err) {
     console.error('reopen failed', err);

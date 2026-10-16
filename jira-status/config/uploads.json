@@ -3,6 +3,5 @@
   "maxFileBytes": 4194304,
   "maxFilesPerRequest": 5,
   "allowedExtensions": ["png", "jpg", "jpeg", "gif", "webp", "pdf", "txt", "log", "csv", "xlsx", "docx", "zip"],
-  "perEmailPerHour": 10,
   "commentTemplate": "Attachment(s) {filenames} uploaded by {email} via the Jira status page."
 }

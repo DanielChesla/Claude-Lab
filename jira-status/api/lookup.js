@@ -3,12 +3,12 @@
 // Request body:  { "email": "someone@profitsolv.com", "query": "NXT-12345" | "00702781" }
 // Responses:     200 { queryType, query, results: [issue...], uploads: {...rules} }
 //                400 invalid input · 403 email domain not allowed · 404 not found
-//                429 rate limited · 500 misconfigured · 502 Jira call failed
+//                500 misconfigured · 502 Jira call failed
 //
 // Shared logic lives in ../lib/jira.js.
 
 import {
-  clientIp, isAllowedEmail, classify, isRateLimited, writeLog,
+  clientIp, isAllowedEmail, classify, writeLog,
   jiraClient, lookupByKey, lookupByCase, uploadRules, commentRules, reopenRules,
 } from '../lib/jira.js';
 import { callerEmail } from '../lib/auth.js';
@@ -33,15 +33,6 @@ export default async function handler(req, res) {
   if (!client) {
     console.error('JIRA_EMAIL / JIRA_API_TOKEN not set');
     return res.status(500).json({ error: 'Server is not configured.' });
-  }
-
-  try {
-    if (await isRateLimited(ip)) {
-      await log({ result: 'rate_limited' });
-      return res.status(429).json({ error: 'Too many lookups. Try again in a minute.' });
-    }
-  } catch (err) {
-    console.error('rate-limit check failed; allowing request', err);
   }
 
   if (!isAllowedEmail(email)) {

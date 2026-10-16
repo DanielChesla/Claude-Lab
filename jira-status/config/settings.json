@@ -4,6 +4,5 @@
   "salesforceCaseField": "customfield_10158",
   "sprintField": "customfield_10020",
   "acceptLanguage": "en-US,en;q=0.9",
-  "rateLimitPerMinute": 30,
   "maxCaseMatches": 20
 }

@@ -1,9 +1,7 @@
-// Shared code for the Vercel functions: config, Postgres log + rate limits, Jira client, issue formatting.
-// Secrets come from environment variables only: JIRA_EMAIL, JIRA_API_TOKEN (read + write scopes),
-// DATABASE_URL. Everything tunable lives in ../config/*.json.
+// Shared code for the serverless functions: config, request logging, Jira client, issue formatting.
+// Secrets come from environment variables only: JIRA_EMAIL, JIRA_API_TOKEN (read + write scopes). Everything tunable lives in ../config/*.json.
 
 import { createRequire } from 'node:module';
-import { neon } from '@neondatabase/serverless';
 
 const require = createRequire(import.meta.url);
 export const allowedDomains = require('../config/allowed-domains.json').map((d) => String(d).trim().toLowerCase());
@@ -20,7 +18,6 @@ export const JIRA_BASE = String(settings.jiraBaseUrl).replace(/\/+$/, '');
 export const API_BASE = String(settings.jiraApiBaseUrl || settings.jiraBaseUrl).replace(/\/+$/, '');
 export const SF_FIELD = settings.salesforceCaseField;   // e.g. customfield_10158
 export const SPRINT_FIELD = settings.sprintField;       // e.g. customfield_10020
-export const RATE_LIMIT = Number(settings.rateLimitPerMinute ?? 30);
 export const MAX_CASE_MATCHES = Number(settings.maxCaseMatches ?? 20);
 
 export const FIELDS = [
@@ -28,143 +25,15 @@ export const FIELDS = [
   'fixVersions', 'resolution', 'labels', 'assignee', 'comment', SPRINT_FIELD, SF_FIELD,
 ];
 
-// ---------- Postgres (lookup log + rate limits) ----------
-
-const dbUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
-export const sql = dbUrl ? neon(dbUrl) : null;
-let schemaReady = false;
-
-export async function ensureSchema() {
-  if (!sql || schemaReady) return;
-  await sql`CREATE TABLE IF NOT EXISTS lookups (
-    id bigserial PRIMARY KEY,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    ip text NOT NULL,
-    email text,
-    query text,
-    query_type text,
-    result text NOT NULL,
-    matched_keys text[] NOT NULL DEFAULT '{}'
-  )`;
-  await sql`CREATE INDEX IF NOT EXISTS lookups_ip_created_idx ON lookups (ip, created_at DESC)`;
-  await sql`CREATE TABLE IF NOT EXISTS uploads (
-    id bigserial PRIMARY KEY,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    ip text NOT NULL,
-    email text NOT NULL,
-    issue_key text NOT NULL,
-    filename text NOT NULL,
-    size_bytes bigint NOT NULL,
-    attachment_id text,
-    result text NOT NULL
-  )`;
-  await sql`CREATE INDEX IF NOT EXISTS uploads_email_created_idx ON uploads (email, created_at DESC)`;
-  await sql`CREATE TABLE IF NOT EXISTS comments (
-    id bigserial PRIMARY KEY,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    ip text NOT NULL,
-    email text NOT NULL,
-    issue_key text NOT NULL,
-    chars int NOT NULL,
-    comment_id text,
-    result text NOT NULL
-  )`;
-  await sql`CREATE INDEX IF NOT EXISTS comments_email_created_idx ON comments (email, created_at DESC)`;
-  await sql`CREATE TABLE IF NOT EXISTS reopen_requests (
-    id bigserial PRIMARY KEY,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    ip text NOT NULL,
-    email text NOT NULL,
-    issue_key text NOT NULL,
-    status text,
-    chars int NOT NULL,
-    comment_id text,
-    label_added boolean NOT NULL DEFAULT false,
-    result text NOT NULL
-  )`;
-  await sql`CREATE INDEX IF NOT EXISTS reopen_email_created_idx ON reopen_requests (email, created_at DESC)`;
-  schemaReady = true;
-}
-
-export async function reopensThisHour(email) {
-  if (!sql) return 0;
-  await ensureSchema();
-  const rows = await sql`SELECT count(*)::int AS n FROM reopen_requests
-                         WHERE email = ${email} AND result = 'requested' AND created_at > now() - interval '1 hour'`;
-  return rows[0]?.n ?? 0;
-}
-
-export async function logReopen(row) {
-  if (!sql) { console.log('reopen', JSON.stringify(row)); return; }
-  try {
-    await ensureSchema();
-    await sql`INSERT INTO reopen_requests (ip, email, issue_key, status, chars, comment_id, label_added, result)
-              VALUES (${row.ip}, ${row.email}, ${row.issueKey}, ${row.status || null}, ${row.chars}, ${row.commentId || null}, ${!!row.labelAdded}, ${row.result})`;
-  } catch (err) {
-    console.error('reopen log write failed', err);
-  }
-}
-
-export async function commentsThisHour(email) {
-  if (!sql) return 0;
-  await ensureSchema();
-  const rows = await sql`SELECT count(*)::int AS n FROM comments
-                         WHERE email = ${email} AND result = 'posted' AND created_at > now() - interval '1 hour'`;
-  return rows[0]?.n ?? 0;
-}
-
-export async function logComment(row) {
-  if (!sql) { console.log('comment', JSON.stringify(row)); return; }
-  try {
-    await ensureSchema();
-    await sql`INSERT INTO comments (ip, email, issue_key, chars, comment_id, result)
-              VALUES (${row.ip}, ${row.email}, ${row.issueKey}, ${row.chars}, ${row.commentId || null}, ${row.result})`;
-  } catch (err) {
-    console.error('comment log write failed', err);
-  }
-}
-
-// Per-IP limit across all requests (lookups and uploads both write to lookups).
-export async function isRateLimited(ip) {
-  if (!sql) return false;
-  await ensureSchema();
-  const rows = await sql`SELECT count(*)::int AS n FROM lookups
-                         WHERE ip = ${ip} AND created_at > now() - interval '1 minute'`;
-  return (rows[0]?.n ?? 0) >= RATE_LIMIT;
-}
-
-export async function uploadsThisHour(email) {
-  if (!sql) return 0;
-  await ensureSchema();
-  const rows = await sql`SELECT count(*)::int AS n FROM uploads
-                         WHERE email = ${email} AND result = 'uploaded' AND created_at > now() - interval '1 hour'`;
-  return rows[0]?.n ?? 0;
-}
+// ---------- Logging ----------
+// One JSON line per request to stdout, which the platform keeps (Vercel function logs, CloudWatch on
+// AWS). There is no database: identity comes from Microsoft sign-in, so there is nothing to rate-limit
+// per email, and anything that needs a durable audit trail can read these lines from the log store.
 
 export async function writeLog(entry) {
-  const row = {
-    ip: entry.ip, email: entry.email || null, query: entry.query || null,
-    queryType: entry.queryType || 'n/a', result: entry.result, keys: entry.keys || [],
-  };
-  if (!sql) { console.log('lookup', JSON.stringify(row)); return; }
-  try {
-    await ensureSchema();
-    await sql`INSERT INTO lookups (ip, email, query, query_type, result, matched_keys)
-              VALUES (${row.ip}, ${row.email}, ${row.query}, ${row.queryType}, ${row.result}, ${row.keys})`;
-  } catch (err) {
-    console.error('lookup log write failed', err);
-  }
-}
-
-export async function logUpload(row) {
-  if (!sql) { console.log('upload', JSON.stringify(row)); return; }
-  try {
-    await ensureSchema();
-    await sql`INSERT INTO uploads (ip, email, issue_key, filename, size_bytes, attachment_id, result)
-              VALUES (${row.ip}, ${row.email}, ${row.issueKey}, ${row.filename}, ${row.sizeBytes}, ${row.attachmentId || null}, ${row.result})`;
-  } catch (err) {
-    console.error('upload log write failed', err);
-  }
+  const { queryType, ...rest } = entry;
+  const isLookup = !['comment', 'upload', 'reopen'].includes(queryType);
+  console.log(JSON.stringify({ ts: new Date().toISOString(), event: isLookup ? 'lookup' : queryType, ...(isLookup && queryType ? { queryType } : {}), ...rest }));
 }
 
 // ---------- Input handling ----------

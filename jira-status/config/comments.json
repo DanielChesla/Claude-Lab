@@ -1,6 +1,5 @@
 {
   "enabled": true,
   "maxChars": 2000,
-  "perEmailPerHour": 20,
   "headerTemplate": "Comment from {email} via the Jira status page"
 }
