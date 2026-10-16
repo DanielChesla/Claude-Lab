@@ -1,0 +1,145 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Jira Ticket Status page - one Lambda behind an HTTP API, static page on S3, both served by CloudFront.
+
+Parameters:
+  EntraTenantId:
+    Type: String
+    Default: ''
+    Description: Microsoft Entra tenant id. Leave empty (with EntraClientId) to use the typed-email gate.
+  EntraClientId:
+    Type: String
+    Default: ''
+    Description: Application (client) id of the "Jira Ticket Status Page" app registration.
+  LogRetentionDays:
+    Type: Number
+    Default: 90
+
+Resources:
+  # Jira service-account credentials. The real value is set by aws/deploy.sh, never by the template.
+  JiraSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${AWS::StackName}/jira'
+      Description: Jira service account for the status page, JSON with email and token
+      SecretString: '{"email":"REPLACE_ME","token":"REPLACE_ME"}'
+
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-api'
+      RetentionInDays: !Ref LogRetentionDays
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-api'
+      CodeUri: .
+      Handler: aws/handler.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      MemorySize: 512
+      Timeout: 29
+      LoggingConfig:
+        LogGroup: !Ref ApiLogGroup
+      Environment:
+        Variables:
+          JIRA_SECRET_ARN: !Ref JiraSecret
+          ENTRA_TENANT_ID: !Ref EntraTenantId
+          ENTRA_CLIENT_ID: !Ref EntraClientId
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref JiraSecret
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /api/{proxy+}
+            Method: ANY
+
+  SiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-site-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  SiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SiteBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub '${SiteBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${AWS::StackName}-oac'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Ref AWS::StackName
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: site
+            DomainName: !GetAtt SiteBucket.RegionalDomainName
+            S3OriginConfig: { OriginAccessIdentity: '' }
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+          - Id: api
+            DomainName: !Sub '${HttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+        DefaultCacheBehavior:
+          TargetOriginId: site
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6        # Managed-CachingOptimized
+        CacheBehaviors:
+          - PathPattern: /api/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad      # Managed-CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac  # Managed-AllViewerExceptHostHeader
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+
+Outputs:
+  SiteUrl:
+    Description: Public URL of the page (add it as a redirect URI on the app registration)
+    Value: !Sub 'https://${Distribution.DomainName}/'
+  SiteBucketName:
+    Value: !Ref SiteBucket
+  DistributionId:
+    Value: !Ref Distribution
+  JiraSecretArn:
+    Value: !Ref JiraSecret
+  ApiFunctionName:
+    Value: !Ref ApiFunction

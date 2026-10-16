@@ -15,6 +15,8 @@ api/attach.js              POST /api/attach — uploads files to a ticket + attr
 api/comment.js             POST /api/comment — adds a plain-text comment with an author header
 api/reopen.js              POST /api/reopen — comment + label asking for a closed ticket to be reopened
 lib/jira.js                shared config loading, request logging, Jira client, formatting
+aws/handler.mjs            AWS Lambda entry point (adapts API Gateway events to the handlers above)
+template.yaml, samconfig.toml, aws/deploy.sh   AWS SAM stack and deploy script (see "Deploying to AWS")
 config/allowed-domains.json  email domains allowed to use the page
 config/projects.json         Jira project keys that can be looked up
 config/settings.json         Jira base URL, field IDs, max results per case
@@ -215,6 +217,56 @@ Notes:
 - The ID token lives in the browser's sessionStorage for the tab; closing the tab signs out.
 - `ENTRA_ISSUER` and `ENTRA_JWKS_URL` exist only so the verifier can be tested against a local
   issuer. Leave them unset.
+
+## Deploying to AWS (SAM)
+
+The same code runs on AWS without changes to `api/` or `lib/`. `aws/handler.mjs` adapts API Gateway
+events to the handlers, and `template.yaml` describes the stack:
+
+- **Lambda** `jira-status-api` (Node 22, arm64) behind an **HTTP API** for `/api/*`.
+- **S3** bucket with the page, private, read only by CloudFront.
+- **CloudFront** serving both on one hostname: `/api/*` to the API (no caching), everything else
+  from S3. One origin means no CORS and the Entra redirect URI is simply the CloudFront URL.
+- **Secrets Manager** secret `jira-status/jira` with `{"email": ..., "token": ...}`, read once per
+  cold start. The Entra ids are plain stack parameters.
+- **CloudWatch Logs** group `/aws/lambda/jira-status-api`, 90-day retention. This is where the
+  JSON request lines go.
+
+Stack name and region live in `samconfig.toml` (`jira-status`, `us-east-1`).
+
+### Prerequisites
+
+AWS CLI v2, SAM CLI, Node 20+, and an AWS profile with rights to create the resources above
+(CloudFormation, Lambda, API Gateway, S3, CloudFront, Secrets Manager, IAM roles, CloudWatch Logs).
+With IAM Identity Center:
+
+```
+aws configure sso --profile jira-status     # start URL, region, account, permission set
+aws sso login --profile jira-status
+```
+
+### Deploy
+
+```
+AWS_PROFILE=jira-status aws/deploy.sh
+```
+
+The script runs `sam build` and `sam deploy`, writes `JIRA_EMAIL`/`JIRA_API_TOKEN` from `.env.local`
+into the secret, syncs `public/` to the bucket and invalidates CloudFront. It prints the site URL
+at the end. Re-run it for every code or config change; nothing else is needed.
+
+First deploy only: add the printed URL (with the trailing slash) as a **redirect URI** on the app
+registration, otherwise Microsoft refuses the sign-in. Later, a company hostname can be added with
+an ACM certificate (us-east-1) and an alias on the distribution; the redirect URI list then gets
+that name too.
+
+### Differences from Vercel
+
+- Request bodies: API Gateway allows 10 MB and Lambda responses 6 MB, so the 4 MB attachment cap
+  still fits (bodies arrive base64-encoded, about a third larger).
+- `vercel.json` is ignored on AWS; `template.yaml` plays that role.
+- Logs: `aws logs tail /aws/lambda/jira-status-api --follow --profile jira-status`.
+- Tear down: `sam delete --profile jira-status` (empty the site bucket first).
 
 ## Changing config
 
