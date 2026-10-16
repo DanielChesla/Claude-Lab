@@ -256,9 +256,22 @@ into the secret, syncs `public/` to the bucket and invalidates CloudFront. It pr
 at the end. Re-run it for every code or config change; nothing else is needed.
 
 First deploy only: add the printed URL (with the trailing slash) as a **redirect URI** on the app
-registration, otherwise Microsoft refuses the sign-in. Later, a company hostname can be added with
-an ACM certificate (us-east-1) and an alias on the distribution; the redirect URI list then gets
-that name too.
+registration, otherwise Microsoft refuses the sign-in with AADSTS50011.
+
+### Company hostname
+
+DNS for profitsolv.com is in Cloudflare (IT), so this is a three-record exchange with IT:
+
+1. Request a certificate in **us-east-1** (CloudFront only accepts certificates from that region):
+   `aws acm request-certificate --domain-name jira-status.profitsolv.com --validation-method DNS --region us-east-1`
+   then `aws acm describe-certificate` to read the validation CNAME (name starts with `_`).
+2. Ask IT to add two CNAMEs in Cloudflare, both **DNS only** (grey cloud, not proxied):
+   the validation record from step 1, and `jira-status.profitsolv.com` → the `CloudFrontDomain`
+   stack output (`dxxxx.cloudfront.net`). Ask them to add `https://jira-status.profitsolv.com/` as
+   a redirect URI on the app registration at the same time.
+3. When the certificate shows `ISSUED`, set `SITE_DOMAIN` and `SITE_CERT_ARN` in `.env.local` and
+   run `aws/deploy.sh` again. The distribution gets the alias and certificate, and `SiteUrl` flips to
+   the company name. The CloudFront URL keeps working as well.
 
 ### Differences from Vercel
 

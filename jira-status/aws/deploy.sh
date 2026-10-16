@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build + deploy the SAM stack, store the Jira credentials in Secrets Manager, upload the page and
-# invalidate CloudFront. Reads .env.local if present (JIRA_EMAIL, JIRA_API_TOKEN, ENTRA_*).
+# invalidate CloudFront. Reads .env.local if present (JIRA_EMAIL, JIRA_API_TOKEN, ENTRA_*, SITE_DOMAIN, SITE_CERT_ARN).
 # Usage: AWS_PROFILE=jira-status aws/deploy.sh      (stack name and region come from samconfig.toml)
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -15,7 +15,13 @@ if ! command -v sam >/dev/null 2>&1 && command -v sam.cmd >/dev/null 2>&1; then
 fi
 
 sam build
-sam deploy --parameter-overrides "EntraTenantId=${ENTRA_TENANT_ID:-} EntraClientId=${ENTRA_CLIENT_ID:-}"
+
+# Only attach the custom hostname once its certificate is issued; CloudFront rejects pending ones.
+if [ -n "${SITE_CERT_ARN:-}" ]; then
+  CERT_STATUS=$(aws acm describe-certificate --certificate-arn "$SITE_CERT_ARN" --region us-east-1 --query Certificate.Status --output text 2>/dev/null || echo UNKNOWN)
+  if [ "$CERT_STATUS" != "ISSUED" ]; then echo "Certificate is $CERT_STATUS, deploying without the custom hostname for now."; SITE_DOMAIN=""; SITE_CERT_ARN=""; fi
+fi
+sam deploy --parameter-overrides "EntraTenantId=${ENTRA_TENANT_ID:-} EntraClientId=${ENTRA_CLIENT_ID:-} DomainName=${SITE_DOMAIN:-} CertificateArn=${SITE_CERT_ARN:-}"
 
 out() { aws cloudformation describe-stacks --stack-name "$STACK" --region "$REGION" --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
 BUCKET=$(out SiteBucketName); DIST=$(out DistributionId); SECRET=$(out JiraSecretArn); URL=$(out SiteUrl)
